@@ -68,3 +68,18 @@ test('network tools navigation and safe result rendering',async({page})=>{
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+test('route analyzer navigation and observed hops',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/network/routes',async route=>{
+   expect(route.request().postDataJSON()).toMatchObject({host:'example.com',family:'ipv4',max_hops:12,attempts:1})
+   await route.fulfill({json:{host:'example.com',method:'udp-error-queue',vantage:'container',results:[{family:'ipv4',ip:'192.0.2.1',dns_ms:1,available:true,reached:true,error:null,hops:[{ttl:1,samples:[{status:'timeout',address:null,rtt_ms:null,icmp_type:null,icmp_code:null,errno:null,error:null}]},{ttl:2,samples:[{status:'destination',address:'192.0.2.1',rtt_ms:10,icmp_type:3,icmp_code:3,errno:111,error:null}]}]}]}})
+ })
+ await page.getByRole('link',{name:'Routes',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Route Analyzer'})).toBeVisible()
+ await page.getByRole('button',{name:'Проверить маршрут'}).click()
+ await expect(page.getByRole('cell',{name:'Нет ответа',exact:true})).toBeVisible()
+ await expect(page.getByRole('cell',{name:'Цель достигнута',exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
