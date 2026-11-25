@@ -1,6 +1,8 @@
-import {test,expect} from '@playwright/test'
+import {test,expect,type Page} from '@playwright/test'
+async function login(page:Page){await page.goto('/');await page.getByLabel('Пароль').fill(process.env.NDC_TEST_PASSWORD!);await page.getByRole('button',{name:'Войти',exact:true}).click();await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()}
+
 test('real API and responsive shell',async({page})=>{
- await page.goto('/')
+ await login(page)
  await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()
  await page.getByRole('link',{name:'DNS Benchmark'}).click()
  await expect(page.locator('#endpoints')).toHaveValue(/https:\/\//)
@@ -16,7 +18,8 @@ test('start, progress, table and export against controlled API fixture',async({p
  let started=false
  await page.route('**/api/status',r=>r.fulfill({json:{running:false,done:started?1:0,total:started?1:0,results:started?[row]:[]}}))
  await page.route('**/api/run',async r=>{expect(r.request().postDataJSON()).toMatchObject({endpoints:[row.endpoint],count:2,mode:'cold'});started=true;await r.fulfill({json:{started:true}})})
- await page.goto('/#/benchmark')
+ await login(page)
+ await page.getByRole('link',{name:'DNS Benchmark'}).click()
  await page.locator('#endpoints').fill(row.endpoint)
  await page.getByLabel('Запросов').fill('2')
  await page.getByRole('button',{name:'Запустить тест'}).click()
