@@ -1,0 +1,26 @@
+name: dns-benchmark-preview
+services:
+  benchmark:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-fnd-01
+    ports:
+      - "8100:8080"
+    volumes:
+      - /DATA/AppData/dns-benchmark-preview:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    x-casaos:
+      ports:
+        - container: "8080"
+          description:
+            en_us: Preview interface
+x-casaos:
+  title:
+    en_us: Network Diagnostics Preview
+  category: Network
+  port_map: "8100"
+  scheme: http
+  index: /
+  main: benchmark

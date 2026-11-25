@@ -1,0 +1,23 @@
+name: dns-benchmark-preview-dns01
+services:
+  benchmark:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-dns-01
+    ports:
+      - "8103:8080"
+    volumes:
+      - /DATA/AppData/dns-benchmark-preview-dns01:/data
+    environment:
+      NDC_SECURE_COOKIE: "0"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+x-casaos:
+  title:
+    en_us: Network Diagnostics DNS-01
+  category: Network
+  port_map: "8103"
+  scheme: http
+  index: /
+  main: benchmark

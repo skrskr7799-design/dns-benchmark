@@ -1,24 +1,163 @@
 name: Build
 on:
   push:
-    branches: [main, work/v0.2]
+    branches: [main, 'work/**']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
   packages: write
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      NDC_TEST_PASSWORD: ci-only-fixture-password-2026
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve frontend dependencies
+        working-directory: web
+        run: |
+          test -f package-lock.json
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-lockfile
+          path: web/package-lock.json
+      - name: Frontend dependency audit
+        working-directory: web
+        run: |
+          npm audit --json > audit.json || true
+          node -e 'const r=require("./audit.json"); if(r.error) {console.log(r.error); process.exit(1)}; console.log(JSON.stringify({metadata:r.metadata,vulnerabilities:r.vulnerabilities},null,2))'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-audit
+          path: web/audit.json
       - run: docker build -t dns-benchmark:test .
-      - run: |
-          docker run -d --name benchmark -p 127.0.0.1:8080:8080 dns-benchmark:test
-          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
-          curl -fsS http://127.0.0.1:8080/api/defaults
+      - name: Python dependency audit
+        run: |
+          docker run --rm --entrypoint python dns-benchmark:test -m pip freeze --all > runtime-versions.txt
+          cat runtime-versions.txt
+          diff -u <(sort -f requirements.lock.txt) <(sort -f runtime-versions.txt)
+          docker run --rm --user root --entrypoint sh dns-benchmark:test -c 'python -m venv /tmp/auditor && /tmp/auditor/bin/pip install --no-cache-dir pip-audit==2.10.1 >&2 && /tmp/auditor/bin/pip-audit --path /usr/local/lib/python3.12/site-packages --format json' > python-audit.log || audit_status=$?
+          cat python-audit.log
+          python -c 'import json; r=json.load(open("python-audit.log")); assert isinstance(r["dependencies"],list)'
+          test "${audit_status:-0}" -le 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-audit
+          path: |
+            python-audit.log
+            runtime-versions.txt
+      - name: Start test container
+        run: |
+          docker run -d --name benchmark --read-only --tmpfs /tmp:size=64m --memory 768m --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /data:uid=10001,gid=10001,mode=0700,size=128m -e NDC_OWNER_PASSWORD="$NDC_TEST_PASSWORD" -e NDC_SECURE_COOKIE=0 -e NDC_ALLOWED_CIDRS=127.0.0.1/32 -p 127.0.0.1:8080:8080 dns-benchmark:test
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/defaults)" = 401
           docker exec benchmark python -c 'import dns.query; print(dns.query.HTTPVersion.H3)'
-      - if: github.ref == 'refs/heads/main'
+      - name: Persistent job lifecycle tests
+        run: docker exec -i benchmark python - < tests/test_jobs.py
+      - name: Destination scope tests
+        run: docker exec -i benchmark python - < tests/test_security.py
+      - name: Local DNS transport integration
+        run: docker exec -i benchmark python - < tests/test_transports.py
+      - name: DNS inspector semantics
+        run: docker exec -i benchmark python - < tests/test_inspector.py
+      - name: Connectivity and TLS integration
+        run: docker exec -i benchmark python - < tests/test_network.py
+      - name: Route analyzer integration
+        run: docker exec -i benchmark python - < tests/test_routes.py
+      - name: Monitoring lifecycle tests
+        run: docker exec -i benchmark python - < tests/test_monitoring.py
+      - name: Agent contract and lifecycle
+        run: docker exec -i benchmark python - < tests/test_agents.py
+      - name: Multi-agent batch lifecycle
+        run: docker exec -i benchmark python - < tests/test_batches.py
+      - name: Diagnostic evidence rules
+        run: docker exec -i benchmark python - < tests/test_diagnostics.py
+      - name: Integration fixtures
+        run: docker exec -i benchmark python - < tests/test_integrations.py
+      - name: Release backup and storage tests
+        run: docker exec -i benchmark python - < tests/test_release.py
+      - name: Concurrency and bounded integration tests
+        run: docker exec -i benchmark python - < tests/test_performance.py
+      - name: Browser smoke
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npm test -- smoke.spec.ts
+      - name: Deterministic API and legacy history smoke
+        run: docker exec -i benchmark python - < tests/api_smoke.py
+      - name: Reset isolated CI fixture before visual checks
+        run: |
+          docker restart benchmark
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/health
+      - name: Obsidian responsive matrix
+        working-directory: web
+        run: npm test -- visual.spec.ts
+      - name: Obsidian browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obsidian-responsive-screenshots
+          path: web/test-results/**/*.png
+          if-no-files-found: warn
+      - name: Resource snapshot
+        if: always()
+        run: docker stats --no-stream benchmark || true
+      - name: Container logs
+        if: failure()
+        run: docker logs benchmark || true
+      - name: Dependency security gate
+        run: |
+          node -e 'const r=require("./web/audit.json"); if(!r.metadata || r.metadata.vulnerabilities.total!==0) process.exit(1)'
+          python -c 'import json,sys; r=json.load(open("python-audit.log")); sys.exit(any(d.get("vulns") or d.get("skip_reason") for d in r["dependencies"]))'
+      - name: Publish image
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark' || github.ref == 'refs/heads/work/dns-03-inspector' || github.ref == 'refs/heads/work/net-01-connectivity' || github.ref == 'refs/heads/work/net-02-routes' || github.ref == 'refs/heads/work/mon-01-monitoring' || github.ref == 'refs/heads/work/dist-01-agents' || github.ref == 'refs/heads/work/dist-02-dashboard' || github.ref == 'refs/heads/work/diag-01-diagnostics' || github.ref == 'refs/heads/work/int-01-integrations' || github.ref == 'refs/heads/work/rel-01-release')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker tag dns-benchmark:test ghcr.io/skrskr7799-design/dns-benchmark:edge
-          docker push ghcr.io/skrskr7799-design/dns-benchmark:edge
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TAG=edge
+          elif [ "${{ github.ref }}" = "refs/heads/work/rel-01-release" ]; then
+            TAG=preview-rel-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/int-01-integrations" ]; then
+            TAG=preview-int-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/diag-01-diagnostics" ]; then
+            TAG=preview-diag-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/dist-02-dashboard" ]; then
+            TAG=preview-dist-02
+          elif [ "${{ github.ref }}" = "refs/heads/work/dist-01-agents" ]; then
+            TAG=preview-dist-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/mon-01-monitoring" ]; then
+            TAG=preview-mon-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/net-02-routes" ]; then
+            TAG=preview-net-02
+          elif [ "${{ github.ref }}" = "refs/heads/work/net-01-connectivity" ]; then
+            TAG=preview-net-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/dns-03-inspector" ]; then
+            TAG=preview-dns-03
+          elif [ "${{ github.ref }}" = "refs/heads/work/dns-02-benchmark" ]; then
+            TAG=preview-dns-02
+          elif [ "${{ github.ref }}" = "refs/heads/work/dns-01-engine" ]; then
+            TAG=preview-dns-01
+          elif [ "${{ github.ref }}" = "refs/heads/work/fnd-03-security" ]; then
+            TAG=preview-fnd-03
+          elif [ "${{ github.ref }}" = "refs/heads/work/fnd-02-backend" ]; then
+            TAG=preview-fnd-02
+          else
+            TAG=preview-fnd-01
+          fi
+          IMAGE=ghcr.io/skrskr7799-design/dns-benchmark
+          docker tag dns-benchmark:test "$IMAGE:$TAG"
+          docker tag dns-benchmark:test "$IMAGE:sha-${{ github.sha }}"
+          docker push "$IMAGE:sha-${{ github.sha }}"
+          docker push "$IMAGE:$TAG"

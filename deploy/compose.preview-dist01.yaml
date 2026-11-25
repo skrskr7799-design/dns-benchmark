@@ -1,0 +1,23 @@
+name: dns-benchmark-preview-dist01
+services:
+  benchmark:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-dist-01
+    ports:
+      - "8109:8080"
+    volumes:
+      - /DATA/AppData/dns-benchmark-preview-dist01:/data
+    environment:
+      NDC_SECURE_COOKIE: "0"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+x-casaos:
+  title:
+    en_us: Network Diagnostics DIST-01
+  category: Network
+  port_map: "8109"
+  scheme: http
+  index: /
+  main: benchmark

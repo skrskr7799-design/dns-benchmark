@@ -1,0 +1,131 @@
+import {test,expect} from '@playwright/test'
+const screens=[['/','overview','Network overview'],['/benchmark','benchmark','DNS Benchmark'],['/providers','providers','DNS Providers'],['/inspector','inspector','DNS Inspector'],['/connectivity','connectivity','Connectivity'],['/tls','tls','TLS Inspector'],['/routes','routes','Route Analyzer'],['/diagnostics','diagnostics','Smart Diagnostics'],['/monitoring','monitoring','Monitoring'],['/history','history','История'],['/agents','agents','Agents'],['/integrations','integrations','Integrations'],['/settings','settings','Settings']]
+const sizes=[[1536,1024],[1536,864],[768,1024],[390,844],[320,800]]
+test('Obsidian responsive matrix',async({page},info)=>{
+ test.setTimeout(360000)
+ await page.goto('/')
+ await page.getByLabel('Пароль').waitFor()
+ for(const [width,height] of sizes){
+  await page.setViewportSize({width,height})
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  await page.screenshot({path:info.outputPath(width+'x'+height,'login.png'),fullPage:true,animations:'disabled'})
+ }
+ await page.getByLabel('Пароль').fill(process.env.NDC_TEST_PASSWORD!)
+ await page.getByRole('button',{name:'Войти',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()
+ for(const [width,height] of sizes){
+  await page.setViewportSize({width,height})
+  if(width<=800){
+   await page.getByRole('button',{name:'Открыть меню'}).click()
+   await expect(page.getByRole('navigation',{name:'Навигация'})).toBeVisible()
+   await page.getByRole('link',{name:'DNS Benchmark',exact:true}).click()
+   await expect(page.getByRole('navigation',{name:'Навигация'})).toBeHidden()
+  }
+  for(const [path,name,title] of screens){
+   await page.goto('/#'+path)
+   await expect(page.locator('main h1')).toHaveText(title)
+   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+   await page.screenshot({path:info.outputPath(width+'x'+height,name+'.png'),fullPage:true,animations:'disabled'})
+  }
+ }
+ await page.goto('/#/settings')
+ await page.getByLabel('Плотность интерфейса').selectOption('compact')
+ await page.getByLabel('Декоративные линии топологии').uncheck()
+ await expect(page.locator('html')).toHaveAttribute('data-density','compact')
+ await page.reload()
+ await expect(page.getByLabel('Декоративные линии топологии')).not.toBeChecked()
+ await page.getByRole('button',{name:'Восстановить оформление'}).click()
+ await expect(page.locator('html')).toHaveAttribute('data-density','standard')
+ // Populated deterministic fixtures are separate from initial-state captures.
+ const endpoints=['https://cloudflare-dns.com/dns-query','https://dns.google/dns-query','udp://9.9.9.9']
+ const rows=endpoints.map((endpoint,i)=>({endpoint,ip:['1.1.1.1','8.8.8.8','9.9.9.9'][i],mode:'cold',family:'ipv4',engine:'python-dns02',protocols:[i===2?'udp':'h2'],count:10,requested_count:10,ok:10,mean:8+i*4,p50:7+i*4,p95:10+i*4,p99:12+i*4,jitter:1.2,error:''}))
+ await page.route('**/api/defaults',r=>r.fulfill({json:endpoints}))
+ await page.route('**/api/status',r=>r.fulfill({json:{running:false,run_id:'fixture-run',revision:1,done:3,total:3,results:rows}}))
+ const samples=rows.flatMap((r,i)=>Array.from({length:10},(_,j)=>({index:j,endpoint:r.endpoint,mode:'cold',domain:'example.com',ok:true,duration_ms:7+i*4+(j%4),connect_ms:2,handshake_ms:3,protocol:r.protocols[0],peer_ip:r.ip,reused:false,rcode:'NOERROR',error:null})))
+ await page.route('**/api/v1/runs/fixture-run/samples?*',r=>r.fulfill({json:{total:samples.length,offset:0,items:samples}}))
+ await page.route('**/api/history',r=>r.fulfill({json:[{time:1764000000,results:rows},{time:1763900000,results:rows.map(x=>({...x,p95:x.p95+3}))}]}))
+ await page.route('**/api/v1/dns/inspect',r=>r.fulfill({json:{name:'example.com.',qtype:'AAAA',comparable:1,groups:1,agreement:null,note:'fixture',results:[{endpoint:endpoints[0],ip:'1.1.1.1',bootstrap_ms:2,duration_ms:8.42,protocol:'h2',peer_ip:'1.1.1.1',error:null,rcode:'NOERROR',flags:['QR','RD','RA','AD'],edns:{version:0,payload:1232},dnssec:{requested_do:true,response_do:false,ad:true,cd:false,independently_validated:false},answer:[{name:'example.com.',type:'AAAA',class:'IN',ttl:300,values:['2001:db8:1234:5678:abcd:ef01:2345:6789']}],authority:[],additional:[],cname_chain:[],fallback:false,outcome:'answer',comparison_group:1}]}}))
+
+ await page.route('**/api/v1/network/routes',r=>r.fulfill({json:{host:'example.com',method:'udp',vantage:'container',results:[{family:'ipv4',ip:'192.0.2.10',dns_ms:2,available:true,reached:true,error:null,hops:[{ttl:1,samples:[{status:'hop',address:'172.18.0.1',rtt_ms:0.4,icmp_type:11,icmp_code:0,errno:null,error:null}]},{ttl:2,samples:[{status:'timeout',address:null,rtt_ms:null,icmp_type:null,icmp_code:null,errno:null,error:null}]},{ttl:3,samples:[{status:'destination',address:'192.0.2.10',rtt_ms:18.2,icmp_type:3,icmp_code:3,errno:null,error:null}]}]}]}}))
+ const cert={subject:'CN=example.com',issuer:'CN=Fixture CA',serial:'00:AB:12',not_before:'2026-01-01',not_after:'2027-01-01',days_remaining:37,sha256:'ab'.repeat(32),san:['example.com','www.example.com']}
+ const probe={host:'example.com',port:443,family:'ipv4',ip:'192.0.2.10',peer_ip:'192.0.2.10',source_ip:'172.18.0.2',dns_ms:4.2,connect_ms:12.1,handshake_ms:18.4,ttfb_ms:28.6,headers_ms:29,total_ms:65.2,http_status:200,tls_version:'TLSv1.3',alpn:'http/1.1',cipher:'TLS_AES_256_GCM_SHA384',certificate:cert,chain:[cert],verified:true,stage:'complete',error:null,ok:true}
+ await page.route('**/api/v1/network/connectivity',r=>r.fulfill({json:{host:'example.com',kind:'tcp',vantage:'container',results:[{family:'ipv4',ip:probe.ip,samples:[probe,{...probe,connect_ms:16.4},{...probe,connect_ms:11.8}],attempted:3,success:3,mean_ms:13.43,variation_ms:2.1}]}}))
+ await page.route('**/api/v1/network/tls',r=>r.fulfill({json:{host:'example.com',vantage:'container',results:[probe]}}))
+ const observation={outcome:'healthy',latency_ms:12.4,reason:null,details:{}}
+ const monitor={id:'fixture-monitor',config:{name:'AdGuard fixture',host:'resolver.example.test',port:443,kind:'https'},enabled:true,running:false,state:'healthy',next_at:1764000300,last_at:1764000000,last_result:observation}
+ await page.route('**/api/v1/monitoring',r=>r.fulfill({json:{monitors:[monitor],incidents:[],delivery:{},telegram_enabled:false}}))
+ await page.route('**/api/v1/monitoring/monitors/fixture-monitor/history',r=>r.fulfill({json:[12.4,15.8,10.2,null,14.1].map((latency_ms,i)=>({...observation,latency_ms,at:1764000000-i*300,outcome:latency_ms==null?'unknown':'healthy'}))}))
+ const nodes=['London fixture','Berlin fixture','Helsinki fixture'].map((name,i)=>({id:String(i+1).repeat(32),name,location:'Fixture site '+(i+1),revoked:0,enrolled:1,online:i!==2,last_seen:1764000000,engine:'python-dns02',enroll_until:null}))
+ await page.route('**/api/v1/agents',r=>r.fulfill({json:{agents:nodes,tasks:[]}}))
+ await page.route('**/api/v1/agents/batches',r=>r.fulfill({json:[]}))
+ await page.route('**/api/v1/integrations',r=>r.fulfill({json:{adguard_configured:true,throughput_configured:true}}))
+ await page.route('**/api/v1/integrations/adguard',r=>r.fulfill({json:{configured:true,errors:{},at:1764000000,version:'fixture',protection_enabled:true,running:true,queries:12345,blocked:2345,mean_ms:15.4,upstreams:['https://resolver.example.test','https://second.example.test'],upstreams_omitted:0,upstream_timings:[{upstream:'https://resolver.example.test',mean_ms:12.4},{upstream:'https://second.example.test',mean_ms:18.1}],time_units:'hours'}}))
+ await page.route('**/api/v1/integrations/throughput',r=>r.fulfill({json:{bytes:8388608,duration_ms:320,mbps:209.715,reason:'byte_limit',body_started:true,byte_limit:8388608,vantage:'container',method:'bounded-http-download'}}))
+ await page.route('**/api/v1/diagnostics',r=>r.fulfill({json:{rule_version:'1',host:'example.com',port:443,kind:'https',vantage:'container',started_at:1,finished_at:2,thresholds:{dns_ms:250,connect_ms:300,handshake_ms:500,ttfb_ms:1000},results:[{family:'ipv4',probe:{...probe,ttfb_ms:1824},dns:[],dns_skipped:'Fixture',dns_agreement:null,findings:[{code:'slow_ttfb_ms',layer:'http',confidence:'observed',evidence:{value_ms:1824,threshold_ms:1000},action:'Repeat measurement'}]}],limitations:[]}}))
+ await page.reload()
+ for(const [width,height] of [[1536,1024],[390,844],[320,800]]){
+  await page.setViewportSize({width,height})
+  const capture=async(name:string)=>{
+   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+   await page.screenshot({path:info.outputPath('populated-fixtures',width+'x'+height,name+'.png'),fullPage:true,animations:'disabled'})
+  }
+  await page.goto('/#/providers')
+  await expect(page.locator('main h1')).toHaveText('DNS Providers')
+  await page.getByRole('checkbox',{name:'Выбрать '+endpoints[0],exact:true}).check()
+  await page.getByRole('checkbox',{name:'Выбрать '+endpoints[1],exact:true}).check()
+  await capture('providers')
+  await page.getByRole('button',{name:'Подготовить тест · 2'}).click()
+  await expect(page.locator('#endpoints')).toHaveValue(endpoints.slice(0,2).join('\n'))
+  await expect(page.getByRole('heading',{name:'Результаты',exact:true})).toBeVisible()
+  await expect(page.getByRole('img',{name:'Задержка успешных запросов в порядке записей'})).toBeVisible()
+  await capture('benchmark')
+  await page.goto('/#/history')
+  await expect(page.getByRole('heading',{name:'P95 trend',exact:true})).toBeVisible()
+  await expect(page.getByRole('img',{name:'P95 по порядку сохранённых запусков'})).toBeVisible()
+  await capture('history')
+  await page.goto('/#/inspector')
+  await page.getByLabel('Тип записи').selectOption('AAAA')
+  await page.getByRole('button',{name:'Проверить DNS'}).click()
+  await expect(page.getByText('2001:db8:1234:5678:abcd:ef01:2345:6789',{exact:true})).toBeVisible()
+  await capture('inspector')
+  await page.getByRole('button',{name:'Raw response',exact:true}).click()
+  await expect(page.locator('.dns-result pre')).toContainText('2001:db8:1234:5678:abcd:ef01:2345:6789')
+  await page.goto('/#/')
+  await expect(page.locator('main h1')).toHaveText('Network overview')
+  await expect(page.getByText('AdGuard fixture',{exact:true})).toBeVisible()
+  await capture('overview')
+  await page.goto('/#/connectivity')
+  await page.getByRole('button',{name:'Проверить соединение',exact:true}).click()
+  await expect(page.getByRole('img',{name:'TCP RTT по порядку попыток'})).toBeVisible()
+  await capture('connectivity')
+  await page.goto('/#/tls')
+  await page.getByRole('button',{name:'Проверить TLS',exact:true}).click()
+  await expect(page.locator('.network-cert').first().getByText('CN=Fixture CA',{exact:true})).toBeVisible()
+  await capture('tls')
+  await page.goto('/#/routes')
+  await page.getByRole('button',{name:'Проверить маршрут',exact:true}).click()
+  await expect(page.getByRole('button',{name:/TTL 3/})).toBeVisible()
+  await page.getByRole('button',{name:/TTL 3/}).click()
+  await expect(page.getByRole('heading',{name:'Node details · TTL 3'})).toBeVisible()
+  await capture('routes')
+  await page.goto('/#/monitoring')
+  await page.getByRole('button',{name:'AdGuard fixture',exact:true}).click()
+  await expect(page.getByRole('img',{name:'История задержек'})).toBeVisible()
+  await capture('monitoring')
+  await page.goto('/#/agents')
+  await expect(page.getByText('Helsinki fixture',{exact:true})).toBeVisible()
+  await capture('agents')
+  await page.goto('/#/integrations')
+  await page.getByRole('button',{name:'Обновить статистику',exact:true}).click()
+  await expect(page.getByText('12345',{exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Измерить загрузку',exact:true}).click()
+  await expect(page.locator('.throughput-value')).toBeVisible()
+  await capture('integrations')
+  await page.goto('/#/diagnostics')
+  await page.getByRole('button',{name:'Запустить диагностику',exact:true}).click()
+  await expect(page.getByText('Высокий TTFB',{exact:true})).toBeVisible()
+  await capture('diagnostics')
+
+ }
+
+})

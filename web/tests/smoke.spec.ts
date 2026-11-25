@@ -1,0 +1,159 @@
+import {test,expect,type Page} from '@playwright/test'
+async function login(page:Page){await page.goto('/');await page.getByLabel('Пароль').fill(process.env.NDC_TEST_PASSWORD!);await page.getByRole('button',{name:'Войти',exact:true}).click();await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()}
+
+test('real API and responsive shell',async({page})=>{
+ await login(page)
+ await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()
+ await page.getByRole('link',{name:'DNS Benchmark'}).click()
+ await expect(page.locator('#endpoints')).toHaveValue(/https:\/\//)
+ await expect(page.getByRole('button',{name:'Запустить тест'})).toBeEnabled()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+ await page.getByRole('button',{name:'Открыть меню'}).click()
+ await page.getByRole('link',{name:'История',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'История'})).toBeVisible()
+ await expect(page.getByText('История пока пуста.')).toBeVisible()
+})
+test('start, progress, table and export against controlled API fixture',async({page})=>{
+ const row={endpoint:'udp://127.0.0.1:15353',ok:2,count:2,mean:10,p50:9,p95:11,p99:11,jitter:1,mode:'cold',ip:'127.0.0.1',error:''}
+ let started=false
+ await page.route('**/api/status',r=>r.fulfill({json:{running:false,done:started?1:0,total:started?1:0,results:started?[row]:[]}}))
+ await page.route('**/api/run',async r=>{expect(r.request().postDataJSON()).toMatchObject({endpoints:[row.endpoint],count:2,mode:'cold'});started=true;await r.fulfill({json:{started:true}})})
+ await login(page)
+ await page.getByRole('link',{name:'DNS Benchmark'}).click()
+ await page.locator('#endpoints').fill(row.endpoint)
+ await page.getByLabel('Запросов').fill('2')
+ await page.getByRole('button',{name:'Запустить тест'}).click()
+ await expect(page.getByRole('cell',{name:'2/2'})).toBeVisible()
+ const download=page.waitForEvent('download')
+ await page.getByRole('button',{name:'Экспорт JSON'}).click()
+ expect((await download).suggestedFilename()).toBe('dns-results.json')
+})
+
+test('inspector navigation, form and deterministic rendering',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/dns/inspect',async route=>{
+   const body=route.request().postDataJSON()
+   expect(body.qtype).toBe('AAAA')
+   expect(body.dnssec).toBe(true)
+   await route.fulfill({json:{name:'example.com.',qtype:'AAAA',comparable:1,groups:1,agreement:null,note:'',results:[{endpoint:'udp://127.0.0.1',ip:'127.0.0.1',bootstrap_ms:1,duration_ms:2,protocol:'udp',peer_ip:null,error:null,rcode:'NOERROR',flags:['QR','AD'],edns:{version:0,payload:1232},dnssec:{requested_do:true,response_do:true,ad:true,cd:false,independently_validated:false},answer:[{name:'example.com.',type:'AAAA',class:'IN',ttl:42,values:['2001:db8::1']}],authority:[],additional:[],cname_chain:[],fallback:false,outcome:'answer',comparison_group:1}]}})
+ })
+ await page.getByRole('link',{name:'DNS Inspector'}).click()
+ await page.getByLabel('Тип записи').selectOption('AAAA')
+ await page.getByLabel('DNSSEC / DO').check()
+ await page.getByRole('button',{name:'Проверить DNS'}).click()
+ await expect(page.getByText('2001:db8::1',{exact:true})).toBeVisible()
+ await expect(page.getByText('Недостаточно ответов для сравнения',{exact:false})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('network tools navigation and safe result rendering',async({page})=>{
+ await login(page)
+ const row={host:'example.com',port:443,family:'ipv4',ip:'192.0.2.1',peer_ip:'192.0.2.1',source_ip:'172.17.0.2',dns_ms:1,connect_ms:2,handshake_ms:3,ttfb_ms:4,headers_ms:5,total_ms:10,http_status:204,tls_version:'TLSv1.3',alpn:'http/1.1',cipher:'TLS_AES_256_GCM_SHA384',certificate:null,chain:null,verified:true,stage:'complete',error:null,ok:true}
+ await page.route('**/api/v1/network/connectivity',async route=>{
+   expect(route.request().postDataJSON()).toMatchObject({kind:'https',family:'both',port:443})
+   await route.fulfill({json:{host:'example.com',kind:'https',vantage:'container',results:[{family:'ipv4',ip:row.ip,samples:[row],attempted:1,success:1,mean_ms:2,variation_ms:0}]}})
+ })
+ await page.route('**/api/v1/network/tls',async route=>{
+   await route.fulfill({json:{host:'example.com',vantage:'container',results:[{...row,http_status:null,certificate:{subject:'CN=example.com',issuer:'CN=Fixture CA',serial:'01',not_before:'2026-01-01',not_after:'2027-01-01',days_remaining:37,sha256:'ab'.repeat(32),san:['example.com']}}]}})
+ })
+ await page.getByRole('link',{name:'Connectivity',exact:true}).click()
+ await page.getByLabel('Проверка',{exact:true}).selectOption('https')
+ await page.getByLabel('Сеть',{exact:true}).selectOption('both')
+ await page.getByRole('button',{name:'Проверить соединение'}).click()
+ await expect(page.getByText('HTTP status:',{exact:false})).toBeVisible()
+ await page.getByRole('link',{name:'TLS Inspector',exact:true}).click()
+ await page.getByRole('button',{name:'Проверить TLS'}).click()
+ await expect(page.getByText('CN=Fixture CA',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('route analyzer navigation and observed hops',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/network/routes',async route=>{
+   expect(route.request().postDataJSON()).toMatchObject({host:'example.com',family:'ipv4',max_hops:12,attempts:1})
+   await route.fulfill({json:{host:'example.com',method:'udp-error-queue',vantage:'container',results:[{family:'ipv4',ip:'192.0.2.1',dns_ms:1,available:true,reached:true,error:null,hops:[{ttl:1,samples:[{status:'timeout',address:null,rtt_ms:null,icmp_type:null,icmp_code:null,errno:null,error:null}]},{ttl:2,samples:[{status:'destination',address:'192.0.2.1',rtt_ms:10,icmp_type:3,icmp_code:3,errno:111,error:null}]}]}]}})
+ })
+ await page.getByRole('link',{name:'Routes',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Route Analyzer'})).toBeVisible()
+ await page.getByRole('button',{name:'Проверить маршрут'}).click()
+ await expect(page.getByRole('cell',{name:'Нет ответа',exact:true})).toBeVisible()
+ await expect(page.getByRole('cell',{name:'Цель достигнута',exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('monitoring creates a paused monitor and displays history',async({page})=>{
+ await login(page)
+ await page.getByRole('link',{name:'Monitoring',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Monitoring',exact:true})).toBeVisible()
+ await page.getByLabel('Название',{exact:true}).fill('CI fixture')
+ await page.getByLabel('Включить',{exact:true}).uncheck()
+ await page.getByRole('button',{name:'Создать монитор'}).click()
+ await expect(page.getByRole('button',{name:'CI fixture',exact:true})).toBeVisible()
+ await expect(page.getByText('Проверок ещё нет.')).toBeVisible()
+ await page.getByRole('button',{name:'Удалить',exact:true}).click()
+ await page.getByRole('button',{name:'Подтвердить удаление'}).click()
+ await expect(page.getByText('Нет мониторов.',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('agents workspace creates a batch and shows both sites',async({page})=>{
+ await login(page)
+ const ids=['a'.repeat(32),'b'.repeat(32)],bid='c'.repeat(32)
+ const nodes=ids.map((id,i)=>({id,name:i?'Berlin':'London',location:i?'Germany':'UK',revoked:0,enrolled:1,online:i===0,last_seen:i?null:Date.now()/1000,engine:'python-dns02',enroll_until:null}))
+ const config={endpoints:['https://cloudflare-dns.com/dns-query'],mode:'both',family:'ipv4',count:5,parallel:1}
+ await page.route('**/api/v1/agents',route=>route.fulfill({json:{agents:nodes,tasks:[]}}))
+ await page.route('**/api/v1/agents/batches',async route=>{
+   if(route.request().method()==='POST'){
+     expect(route.request().postDataJSON()).toMatchObject({agent_ids:ids,config})
+     await route.fulfill({status:202,json:{id:bid,duplicate:false}})
+   }else await route.fulfill({json:[]})
+ })
+ await page.route('**/api/v1/agents/batches/'+bid,route=>route.fulfill({json:{id:bid,created:1,config,members:nodes.map((a,i)=>({id:a.id,agent_id:a.id,name:a.name,location:a.location,state:i?'queued':'completed',online:a.online,created:1,finished:i?null:2,last_seen:a.last_seen,error:null,results:i?[]:[{mode:'cold',ip:'1.1.1.1',protocols:['h2'],count:5,ok:5,mean:10,p95:12,p50:10,jitter:1,warmup_ok:false,reused:0,unknown_reuse:0}]}))}}))
+ await page.getByRole('link',{name:'Agents',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Agents',exact:true})).toBeVisible()
+ await page.getByRole('checkbox',{name:'London · Online'}).check()
+ await page.getByRole('checkbox',{name:'Berlin · Offline'}).check()
+ await page.getByRole('button',{name:'Запустить сравнение'}).click()
+ await expect(page.getByRole('heading',{name:'Сравнение узлов'})).toBeVisible()
+ await expect(page.getByRole('cell',{name:'Нет измерений',exact:true})).toBeVisible()
+ await expect(page.getByText('12.00 мс',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('smart diagnostics separates observations from hypotheses',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/diagnostics',async route=>{
+   expect(route.request().postDataJSON()).toMatchObject({host:'example.com',kind:'https',port:443,family:'ipv4',endpoints:[]})
+   await route.fulfill({json:{rule_version:'1',host:'example.com',port:443,kind:'https',vantage:'container',started_at:1,finished_at:2,thresholds:{dns_ms:250,connect_ms:300,handshake_ms:500,ttfb_ms:1000},results:[{family:'ipv4',probe:{ip:'192.0.2.1',stage:'tcp',ok:false,error:'TimeoutError',dns_ms:2,connect_ms:null,handshake_ms:null,ttfb_ms:null,http_status:null,verified:null},dns:[],dns_skipped:'No explicit resolver selected',dns_agreement:null,findings:[{code:'tcp_failed',layer:'tcp',confidence:'observed',evidence:{error:'TimeoutError'},action:'Inspect service'}]}],limitations:[]}})
+ })
+ await page.getByRole('link',{name:'Smart Diagnostics',exact:true}).click()
+ await page.getByRole('button',{name:'Запустить диагностику'}).click()
+ await expect(page.getByText('TCP-соединение не установлено',{exact:true})).toBeVisible()
+ await expect(page.getByText('Наблюдение',{exact:true})).toBeVisible()
+ await page.getByText('Подтверждающие данные',{exact:true}).click()
+ await expect(page.locator(".diag-finding pre").filter({hasText: /"error": "TimeoutError"/})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('integrations show opt-in status and redacted aggregate statistics',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/integrations',route=>route.fulfill({json:{adguard_configured:true,throughput_configured:false}}))
+ await page.route('**/api/v1/integrations/adguard',async route=>{
+   expect(route.request().method()).toBe('POST')
+   await route.fulfill({json:{configured:true,errors:{},at:1,version:'v0.fixture',protection_enabled:true,running:true,queries:123,blocked:20,mean_ms:15,upstreams:['https://resolver.test'],upstreams_omitted:0,upstream_timings:[],time_units:'hours'}})
+ })
+ await page.getByRole('link',{name:'Integrations',exact:true}).click()
+ await expect(page.getByRole('button',{name:'Измерить загрузку'})).toBeDisabled()
+ await page.getByRole('button',{name:'Обновить статистику'}).click()
+ await expect(page.getByText('https://resolver.test',{exact:true})).toBeVisible()
+ await expect(page.getByText('123',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
