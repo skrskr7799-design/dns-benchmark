@@ -234,6 +234,59 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
             agent.client.close()
 print("Outbound agent and real DNS smoke passed")
 
+# Same profile on two independent agent identities, including an offline interval.
+with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):
+    with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+        sock.bind(("127.0.0.1",0))
+        sock.settimeout(15)
+        endpoint=f"udp://127.0.0.1:{sock.getsockname()[1]}"
+        agents=[]
+        ids=[]
+        try:
+            for i in range(2):
+                invitation=request("/api/v1/agents/invite",{"name":f"batch fixture {i}","location":f"site {i}"})
+                root=Path(tmp)/str(i)
+                root.mkdir()
+                (root/"enrollment-token").write_text(invitation["token"])
+                a=Agent(root,base,[endpoint])
+                agents.append(a)
+                a.enroll()
+                ids.append(invitation["id"])
+            body={"request_id":"b"*32,"agent_ids":ids,"config":{"endpoints":[endpoint],"mode":"both","count":1}}
+            batch=request("/api/v1/agents/batches",body)
+            assert not batch["duplicate"]
+            assert request("/api/v1/agents/batches",body)["duplicate"]
+            def respond_batch():
+                for _ in range(6):
+                    data,peer=sock.recvfrom(65535)
+                    q=dns.message.from_wire(data)
+                    r=dns.message.make_response(q)
+                    r.answer.append(dns.rrset.from_text(q.question[0].name,60,"IN","A","192.0.2.1"))
+                    sock.sendto(r.to_wire(),peer)
+            thread=threading.Thread(target=respond_batch,daemon=True)
+            thread.start()
+            agents[0].step()
+            detail=request("/api/v1/agents/batches/"+batch["id"])
+            assert {m["state"] for m in detail["members"]}=={"completed","queued"}
+            agents[1].client.close()
+            agents[1]=Agent(Path(tmp)/"1",base,[endpoint])
+            agents[1].enroll()
+            agents[1].step()
+            detail=request("/api/v1/agents/batches/"+batch["id"])
+            assert len(detail["members"])==2
+            for member in detail["members"]:
+                assert member["state"]=="completed",member
+                assert [r["mode"] for r in member["results"]]==["cold","warm"]
+                assert all(r["ok"]==1 and r["p95"] is not None for r in member["results"])
+            thread.join(2)
+            assert not thread.is_alive()
+            for id in ids:
+                request("/api/v1/agents/"+id+"/revoke",{})
+        finally:
+            for a in agents:
+                a.client.close()
+print("Two-agent batch and offline resume smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
