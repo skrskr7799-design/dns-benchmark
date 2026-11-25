@@ -66,7 +66,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if(response.status===204)return undefined as T
   return response.json() as Promise<T>
 }
+export type IntelligencePreset='balanced'|'reliability'|'speed'
+export type ScoreKey='reliability'|'p50'|'p95'|'jitter'
+export interface IntelligenceTarget {target_id:string;endpoint:string;bootstrap_ip:string;series:number;attempted:number;successful:number;successful_series:number;latency_series:number;example_evidence_id:string;observed_success_ratio:number;median_series_ms:Record<Exclude<ScoreKey,'reliability'>,number|null>;score:number|null;rank:number|null;components:Record<ScoreKey,{weight:number;normalized:number;contribution:number}>|null;unranked_reasons:string[]}
+export interface IntelligenceGroup {group_id:string;mode:'cold'|'warm';protocol:string;family:string;profile_revision:string;matched_runs:number;first_received_at:number;last_received_at:number;targets:IntelligenceTarget[];recommended_target_id:string|null;recommendation_blockers:string[]}
+export interface IntelligenceRanking {methodology:string;preset:IntelligencePreset;weights:Record<ScoreKey,number>;latency_reference_ms:Record<Exclude<ScoreKey,'reliability'>,number>;minimum:{matched_runs:number;attempted_queries:number;successful_queries:number;recommendation_success_ratio:number};records_read:number;runs_considered:number;excluded_run_groups:Record<string,number>;groups:IntelligenceGroup[];coverage:{producer_pending:number;stream_error:string|null;complete_window_verified:boolean;time_basis:string;since:number;before:number;retained_usage_at_read:{rows:number;bytes:number;evicted:number;last_evicted_at:number|null}};limitations:string[]}
+export interface EvidenceDetail {id:string;seq:number;received_at:number;record:{source_kind:string;source_id:string;source_revision:number;source_part:string;run_id:string|null;vantage_id:string;observed_at:number|null;outcome:string;provenance:string;protocol:string|null;family:string|null;measurements:{name:string;unit:string;value:number|null}[];limitations:string[]}}
 export const api = {
+  intelligence:(since:number,before:number,preset:IntelligencePreset,signal?:AbortSignal)=>request<IntelligenceRanking>('/api/v1/intelligence/dns/ranking?'+new URLSearchParams({since:String(since),before:String(before),preset}),{signal}),
+  intelligenceEvidence:(id:string,signal?:AbortSignal)=>request<EvidenceDetail>('/api/v1/intelligence/observations/'+encodeURIComponent(id),{signal}),
   runs:(offset:number)=>request<RunIndex[]>('/api/v1/runs?offset='+offset),
   deleteRun:(id:string)=>request<void>('/api/v1/runs/'+encodeURIComponent(id),{method:'DELETE'}),
   integrations:()=>request<IntegrationStatus>('/api/v1/integrations'),

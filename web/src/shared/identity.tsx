@@ -1,6 +1,7 @@
 import type {ReactNode} from 'react'
 const paths:Record<string,ReactNode>={
  overview:<><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></>,
+ intelligence:<><path d="m12 2 9 5v10l-9 5-9-5V7Z M3 7l9 5 9-5M12 12v10"/><circle cx="12" cy="7" r="1.4"/><path d="M7 14l2 2m6 0 2-2"/></>,
  benchmark:<><path d="M4 18a9 9 0 1 1 16 0M12 13l5-5M5 13h2M12 5v2M17 13h2"/><circle cx="12" cy="13" r="1"/></>,
  dns:<><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></>,
  search:<><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></>,
