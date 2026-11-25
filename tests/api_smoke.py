@@ -1,11 +1,28 @@
 import json, socket, threading, time, sqlite3, urllib.request
 import dns.message, dns.rrset
+import os, http.cookiejar, urllib.error
+opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+csrf=''
+def expect_error(req,code):
+    try:
+        opener.open(req,timeout=10)
+    except urllib.error.HTTPError as exc:
+        assert exc.code==code,exc.code
+    else:
+        raise AssertionError('Expected HTTP '+str(code))
+base='http://127.0.0.1:8080'
+expect_error(urllib.request.Request(base+'/api/status'),401)
+login=urllib.request.Request(base+'/api/auth/login',data=json.dumps({'password':os.environ['NDC_OWNER_PASSWORD']}).encode(),headers={'Content-Type':'application/json','X-NDC-Request':'1'})
+with opener.open(login,timeout=10) as response:
+    csrf=json.load(response)['csrf']
+expect_error(urllib.request.Request(base+'/api/run',data=b'{}',headers={'Content-Type':'application/json'}),403)
+expect_error(urllib.request.Request(base+'/api/run',data=b'{}',headers={'Content-Type':'application/json','X-CSRF-Token':csrf,'Origin':'https://other.example'}),403)
 
 def request(path, body=None):
     req = urllib.request.Request("http://127.0.0.1:8080" + path,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as r:
+        headers={"Content-Type": "application/json","X-CSRF-Token":csrf})
+    with opener.open(req, timeout=10) as r:
         return json.load(r)
 
 with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -42,12 +59,28 @@ print("Local UDP and legacy history smoke passed")
 assert request("/api/v1/capabilities")["durable_runs"]
 job_id = request("/api/status")["run_id"]
 assert request("/api/v1/runs/"+job_id)["status"] == "completed"
-with urllib.request.urlopen("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
+with opener.open("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
     assert b"event: snapshot" in response.read()
 profile=request("/api/v1/profiles",{"name":"smoke","config":{"endpoints":["udp://127.0.0.1"],"count":2}})
 assert request("/api/v1/profiles")[0]["id"]==profile["id"]
-req=urllib.request.Request("http://127.0.0.1:8080/api/v1/profiles/"+profile["id"],method="DELETE")
-with urllib.request.urlopen(req,timeout=10) as response:
+req=urllib.request.Request("http://127.0.0.1:8080/api/v1/profiles/"+profile["id"],method="DELETE",headers={"X-CSRF-Token":csrf})
+with opener.open(req,timeout=10) as response:
     assert response.status==204
 assert request("/api/v1/profiles")==[]
 print("v1 API, SSE and profiles smoke passed")
+
+logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
+with opener.open(logout,timeout=10) as response:
+    assert not json.load(response)["authenticated"]
+expect_error(urllib.request.Request(base+"/api/status"),401)
+for _ in range(9):
+    bad=urllib.request.Request(base+"/api/auth/login",data=b'{"password":"wrong"}',headers={"Content-Type":"application/json","X-NDC-Request":"1"})
+    # Browser tests have also logged in; global budget may already be exhausted.
+    try:
+        opener.open(bad,timeout=10)
+    except urllib.error.HTTPError as exc:
+        assert exc.code in (401,429)
+    else:
+        raise AssertionError("wrong password accepted")
+expect_error(bad,429)
+print("Authentication, CSRF, logout and rate limit smoke passed")
