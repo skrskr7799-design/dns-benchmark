@@ -82,5 +82,6 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 |---|---|---|
 | Existing platform | owner initial acceptance, partial | UI/login reported working on CasaOS; remaining live transport/agent/integration gates in REL-01 |
 | Mobile drawer | implemented / CI passed / merge pending | 4a5121d, 45615833349; actual iOS retest after main publication |
-| NIP-00 | planned | collect evidence and distinguish known vs missing |
-| NIP-01..13 | planned | no implementation in this roadmap commit |
+| NIP-00 | partial | [baseline inventory](NIP-00.md); real acceptance pending |
+| NIP-01A | implemented candidate / CI pending | [contract and derived store](NIP-01.md); source ingestion not enabled |
+| NIP-01B..13 | planned | source adapters, scheduler and consumer modules pending |

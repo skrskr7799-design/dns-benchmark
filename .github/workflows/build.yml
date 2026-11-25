@@ -87,6 +87,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_integrations.py
       - name: Release backup and storage tests
         run: docker exec -i benchmark python - < tests/test_release.py
+      - name: Intelligence evidence contract and transactional store
+        run: docker exec -i benchmark python - < tests/test_evidence.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

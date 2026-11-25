@@ -7,6 +7,8 @@ from unittest.mock import patch
 from backend.ndc.storage import Store, Busy
 from backend.ndc.backup import backup,restore
 from backend.ndc.security import Security,matches_csrf
+from backend.ndc.evidence import EvidenceStore
+from unittest.mock import patch as env_patch
 
 CFG={"endpoints":["udp://127.0.0.1"],"count":1,"mode":"cold","family":"ipv4","parallel":1}
 class ReleaseTests(unittest.TestCase):
@@ -39,6 +41,13 @@ class ReleaseTests(unittest.TestCase):
         self.store.finish(id,"completed")
         password=self.data/"owner-password"
         password.write_text("fixture-password-long");password.chmod(0o600)
+        with env_patch.dict(os.environ,{},clear=False):
+            os.environ.pop("NDC_OWNER_PASSWORD",None)
+            account_dir=self.root/"account"
+            account_dir.mkdir()
+            Security(account_dir).setup("admin","fixture-account-password")
+            (account_dir/"owner-account.json").replace(self.data/"owner-account.json")
+        EvidenceStore(self.data/"intelligence.sqlite").initialize()
         dest=self.root/"backup"
         with open(self.data/"coordinator.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -49,6 +58,9 @@ class ReleaseTests(unittest.TestCase):
         restore(dest,restored)
         self.assertEqual(Store(restored/"history.sqlite").get(id)["status"],"completed")
         self.assertEqual((restored/"owner-password").stat().st_mode&0o777,0o600)
+        self.assertEqual((restored/"owner-account.json").stat().st_mode&0o777,0o600)
+        Security(restored).login("fixture-account-password","admin")
+        self.assertEqual(EvidenceStore(restored/"intelligence.sqlite").status()["rows"],0)
         with self.assertRaises(FileExistsError):
             restore(dest,restored)
         (dest/"owner-password").write_text("changed")

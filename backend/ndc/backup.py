@@ -14,7 +14,7 @@ import stat
 from pathlib import Path
 from contextlib import contextmanager
 
-DATABASES=("history.sqlite","monitoring.sqlite","agents.sqlite")
+DATABASES=("history.sqlite","monitoring.sqlite","agents.sqlite","intelligence.sqlite")
 FILES=DATABASES+("owner-password","owner-account.json","telegram-token","adguard.json","throughput.json")
 
 @contextmanager
