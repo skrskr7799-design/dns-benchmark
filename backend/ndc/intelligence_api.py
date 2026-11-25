@@ -3,6 +3,7 @@ from typing import Literal
 from fastapi import APIRouter,Request,Query,HTTPException
 from .evidence import Source,Kind,Outcome
 from .dns_cohorts import aggregate,NarrowQuery
+from .dns_intelligence import rank
 
 router=APIRouter(prefix="/api/v1/intelligence")
 EvidenceKind=Literal["observations","events"]
@@ -26,6 +27,26 @@ def dns_cohorts(request:Request,since:float=Query(...,ge=0,le=253402300799),
         "vantage":vantage,"profile":profile,"retained_usage_at_read":usage,
         "producer_status_at_response":producer,"stream_error":state.evidence_drain.errors.get(source+"-v1"),
         "complete_window_verified":False,"source_and_derived_status_not_atomic":True}
+    return result
+
+@router.get("/dns/ranking")
+def dns_ranking(request:Request,since:float=Query(...,ge=0,le=253402300799),
+    before:float=Query(...,ge=0,le=253402300799),
+    preset:Literal["balanced","reliability","speed"]="balanced",
+    profile:str|None=Query(None,pattern=r"^[a-f0-9]{64}$")):
+    state=request.app.state
+    try:
+        rows,usage=state.evidence.dns_cohort_rows(source="benchmark",since=since,before=before,vantage="controller",profile=profile)
+        ids={r["record"]["run_id"] for r in rows if r["record"]["run_id"]}
+        metadata=state.store.ranking_metadata(ids)
+        result=rank(rows,metadata,preset,pending=state.store.evidence_pending_count(),
+            stream_error=state.evidence_drain.errors.get("benchmark-v1"))
+    except NarrowQuery:
+        raise HTTPException(422,"Narrow the ranking time range or profile") from None
+    except ValueError:
+        raise HTTPException(422,"Invalid ranking parameters") from None
+    result["coverage"].update({"time_basis":"received_at","since":since,"before":before,
+        "retained_usage_at_read":usage,"source_and_derived_status_not_atomic":True})
     return result
 
 @router.get("/{kind}")

@@ -88,5 +88,6 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-01B2 | implemented / CI passed (45647219921) | monitor observation/incident outbox, fair drain and coverage counters |
 | NIP-01B3 | implemented / CI passed (45649570754) | agent result outbox, sample-derived metrics and three-stream drain |
 | NIP-01C1 | implemented / CI passed (45650114432) | source allocations, pressure retention and authenticated read API |
-| NIP-01C2 | implemented candidate / CI pending | comparable DNS cohorts and bounded coverage-aware read API |
-| NIP-02..13 | planned | scoring, UI, remaining modules; physical budget and shared scheduler hardening remain open |
+| NIP-01C2 | implemented / CI passed (45650846494) | comparable DNS cohorts and bounded coverage-aware read API |
+| NIP-02A | implemented candidate / CI pending | [DNS Intelligence scoring](NIP-02.md), matched local runs and recommendation gates |
+| NIP-02B..13 | planned | UI, acceptance and remaining modules; physical budget and shared scheduler hardening remain open |

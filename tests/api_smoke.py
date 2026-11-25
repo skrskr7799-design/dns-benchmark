@@ -80,7 +80,13 @@ assert cohorts["methodology"]=="dns-cohorts-v1" and cohorts["eligible_records"]>
 assert cohorts["coverage"]["complete_window_verified"] is False
 assert cohorts["ranking"] is None
 assert any(t["attempted"]>=2 for g in cohorts["cohorts"] for t in g["targets"])
-print("Authenticated intelligence read API, benchmark ingestion and cohort analysis passed")
+ranking_path=cohort_path.replace("/cohorts","/ranking")
+ranking=request(ranking_path)
+assert ranking["methodology"]=="dns-intelligence-v1"
+assert ranking["coverage"]["complete_window_verified"] is False
+assert all(g["recommended_target_id"] is None for g in ranking["groups"])
+expect_error(urllib.request.Request(base+ranking_path+"&preset=bad"),422)
+print("Authenticated intelligence read API, benchmark ingestion, cohort analysis and conservative ranking passed")
 with opener.open("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
     assert b"event: snapshot" in response.read()
 profile=request("/api/v1/profiles",{"name":"smoke","config":{"endpoints":["udp://127.0.0.1"],"count":2}})

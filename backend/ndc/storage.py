@@ -130,6 +130,25 @@ class Store:
                 job["results"]=[summary(x) for x in job["results"]]
             return job
 
+    def ranking_metadata(self,ids):
+        # Bounded snapshot of source identity only; no raw query payload returned.
+        from .dns_intelligence import MAX_RUNS,NarrowQuery
+        ids=sorted(set(ids))
+        if len(ids)>MAX_RUNS:
+            raise NarrowQuery("Too many source runs")
+        if not ids:
+            return {}
+        placeholders=",".join("?" for _ in ids)
+        with self.connect() as c:
+            c.execute("BEGIN")
+            jobs={r["id"]:{"status":r["status"],"config":json.loads(r["config"]),"results":{}}
+                for r in c.execute(f"SELECT id,status,config FROM jobs WHERE id IN ({placeholders})",ids)}
+            for r in c.execute(f"""SELECT job_id,ordinal,json_extract(payload,'$.endpoint') AS endpoint,
+                json_extract(payload,'$.ip') AS ip,json_extract(payload,'$.mode') AS mode
+                FROM job_results WHERE job_id IN ({placeholders})""",ids):
+                jobs[r["job_id"]]["results"][r["ordinal"]]={k:r[k] for k in ("endpoint","ip","mode")}
+            return jobs
+
     def latest_id(self):
         with self.connect() as c:
             row = c.execute("""SELECT id FROM jobs ORDER BY
