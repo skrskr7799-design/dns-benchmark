@@ -2,12 +2,15 @@ import asyncio
 import json
 import csv
 import io
+import threading
 from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
-from .models import Run, Profile
+from .models import Run, Profile, Inspect
+from .probes.inspector import inspect
 from .storage import Busy, TERMINAL
 
 router=APIRouter()
+inspection_slot=threading.BoundedSemaphore(1)
 
 def services(request):
     return request.app.state.store, request.app.state.coordinator
@@ -47,7 +50,7 @@ def legacy_history(request: Request):
 def capabilities():
     return {"api_version":1,"engine":"python-dns02","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"both":True,"raw_samples":True,"authenticated":True}
+            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
@@ -143,3 +146,12 @@ def delete_profile(request: Request, profile_id: str):
     if not services(request)[0].delete_profile(profile_id):
         raise HTTPException(404,"Profile not found")
     return Response(status_code=204)
+
+@router.post("/api/v1/dns/inspect")
+def inspect_dns(request: Request, body: Inspect):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"DNS inspection already running")
+    try:
+        return inspect(body)
+    finally:
+        inspection_slot.release()
