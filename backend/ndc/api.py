@@ -1,6 +1,8 @@
 import asyncio
 import json
-from fastapi import APIRouter, HTTPException, Request, Response
+import csv
+import io
+from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
 from .models import Run, Profile
 from .storage import Busy, TERMINAL
@@ -43,9 +45,9 @@ def legacy_history(request: Request):
 
 @router.get("/api/v1/capabilities")
 def capabilities():
-    return {"api_version":1,"engine":"python-dns01","durable_runs":True,"cancel":True,"profiles":True,
+    return {"api_version":1,"engine":"python-dns02","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"authenticated":True}
+            "h3_reuse_verified":False,"both":True,"raw_samples":True,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
@@ -91,8 +93,35 @@ async def events(request: Request, job_id: str):
     return StreamingResponse(stream(),media_type="text/event-stream",headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
 @router.get("/api/v1/runs/{job_id}/export")
-def export_run(request: Request, job_id: str):
-    return get_job(services(request)[0],job_id)
+def export_run(request: Request, job_id: str, format: str="json"):
+    job=services(request)[0].get(job_id,raw=True)
+    if job is None:
+        raise HTTPException(404,"Run not found")
+    if format=="json":
+        return job
+    if format!="csv":
+        raise HTTPException(400,"Unsupported export format")
+    out=io.StringIO()
+    fields=["endpoint","mode","ip","index","domain","qtype","ok","duration_ms","rcode","protocol","peer_ip","reused","connect_ms","handshake_ms","error"]
+    writer=csv.DictWriter(out,fieldnames=fields,extrasaction="ignore")
+    writer.writeheader()
+    for row in sample_rows(job):
+        # Defend spreadsheets against formulas in untrusted text cells.
+        writer.writerow({k:("'"+v if isinstance(v,str) and v.startswith(("=","+","-","@","\t","\r","\n")) else v) for k,v in row.items()})
+    return Response(out.getvalue(),media_type="text/csv",headers={"Content-Disposition":"attachment; filename=dns-samples.csv"})
+
+def sample_rows(job):
+    for result in job["results"]:
+        for sample in result.get("samples",[]):
+            yield {"endpoint":result["endpoint"],"mode":result["mode"],"ip":result.get("ip"),**sample}
+
+@router.get("/api/v1/runs/{job_id}/samples")
+def samples(request: Request, job_id: str, offset: int=Query(0,ge=0), limit: int=Query(200,ge=1,le=1000)):
+    job=services(request)[0].get(job_id,raw=True)
+    if job is None:
+        raise HTTPException(404,"Run not found")
+    rows=list(sample_rows(job))
+    return {"total":len(rows),"offset":offset,"items":rows[offset:offset+limit]}
 
 @router.get("/api/v1/profiles")
 def list_profiles(request: Request):
