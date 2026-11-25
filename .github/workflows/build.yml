@@ -94,6 +94,13 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           npm test
+      - name: Obsidian browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obsidian-responsive-screenshots
+          path: web/test-results/**/*.png
+          if-no-files-found: warn
       - name: Deterministic API and legacy history smoke
         run: docker exec -i benchmark python - < tests/api_smoke.py
       - name: Resource snapshot

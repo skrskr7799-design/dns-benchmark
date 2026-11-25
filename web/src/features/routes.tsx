@@ -1,11 +1,17 @@
 import {useState} from 'react'
 import {useMutation,useQuery} from '@tanstack/react-query'
 import {api,type NetFamily,type RouteResult} from '../shared/api'
+import {Icon} from '../shared/identity'
+import {LatencyPlot} from '../shared/plots'
 import {fmt} from '../shared/results'
 const labels:Record<string,string>={hop:'Промежуточный ответ',destination:'Цель достигнута',timeout:'Нет ответа',port_unreachable:'Порт недоступен',icmp_error:'ICMP ошибка',local_error:'Локальная ошибка'}
 function RoutePanel({r}:{r:RouteResult}){
+ const [selected,setSelected]=useState(0)
+ const hop=r.hops[Math.min(selected,Math.max(0,r.hops.length-1))]
+ const values=r.hops.map(h=>{const v=h.samples.filter(s=>s.rtt_ms!=null).map(s=>s.rtt_ms!);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null})
+ const destination=r.hops.flatMap(h=>h.samples).filter(s=>s.status==='destination'&&s.rtt_ms!=null)
  return <section className="panel"><div className="section-title"><h2>{r.family.toUpperCase()} · {r.ip??'—'}</h2><span className={'status '+(r.reached?'ok':'partial')}>{!r.available?'Недоступно':r.reached?'Цель достигнута':'Достижение не подтверждено'}</span></div><p>DNS: {fmt(r.dns_ms)} мс</p>{r.error&&<p className="error">{r.error}</p>}
- <div className="table-wrap"><table><thead><tr><th>TTL</th><th>Попытка</th><th>Узел</th><th>RTT, мс</th><th>Результат</th><th>ICMP тип / код</th></tr></thead><tbody>{r.hops.flatMap(h=>h.samples.map((s,i)=><tr key={h.ttl+'-'+i}><td>{h.ttl}</td><td>{i+1}</td><td>{s.address??'—'}</td><td>{fmt(s.rtt_ms)}</td><td>{labels[s.status]??s.status}{s.error&&<div className="error">{s.error}</div>}</td><td>{s.icmp_type??'—'} / {s.icmp_code??'—'}</td></tr>))}</tbody></table></div></section>
+ <div className="phase-grid"><div><small>Проверено TTL</small><b>{r.hops.length}</b></div><div><small>RTT назначения</small><b>{destination.length?fmt(destination[0].rtt_ms)+' мс':'—'}</b></div><div><small>Ответов ICMP</small><b>{r.hops.flatMap(h=>h.samples).filter(s=>s.address!=null).length}</b></div></div>{r.hops.length>0&&<><div className="route-strip" aria-label="Наблюдаемые узлы">{r.hops.map((h,i)=><button key={h.ttl} className={hop?.ttl===h.ttl?'route-node selected':'route-node'} onClick={()=>setSelected(i)} aria-pressed={hop?.ttl===h.ttl}><span className="route-orb"><Icon name={h.samples.some(s=>s.status==='destination')?'check':'route'}/></span><b>TTL {h.ttl}</b><small>{h.samples.find(s=>s.address)?.address??'Нет ответа'}</small></button>)}</div><div className="plot-grid"><section className="route-subpanel"><h3>Latency per hop</h3><LatencyPlot values={values} label="Средний RTT ответивших проб на каждом TTL"/><small>RTT от контейнера, не задержка отдельных сегментов.</small></section><section className="route-subpanel"><h3>Node details · TTL {hop?.ttl}</h3>{hop?.samples.map((s,i)=><p className="dns-value" key={i}>{s.address??'—'} · {fmt(s.rtt_ms)} мс · {labels[s.status]??s.status}</p>)}</section></div></>}<div className="table-wrap"><table><thead><tr><th>TTL</th><th>Попытка</th><th>Узел</th><th>RTT, мс</th><th>Результат</th><th>ICMP тип / код</th></tr></thead><tbody>{r.hops.flatMap(h=>h.samples.map((s,i)=><tr key={h.ttl+'-'+i}><td>{h.ttl}</td><td>{i+1}</td><td>{s.address??'—'}</td><td>{fmt(s.rtt_ms)}</td><td>{labels[s.status]??s.status}{s.error&&<div className="error">{s.error}</div>}</td><td>{s.icmp_type??'—'} / {s.icmp_code??'—'}</td></tr>))}</tbody></table></div></section>
 }
 export function Routes(){
  const [host,setHost]=useState('example.com'),[family,setFamily]=useState<NetFamily>('ipv4'),[maxHops,setMaxHops]=useState(12),[attempts,setAttempts]=useState(1)
