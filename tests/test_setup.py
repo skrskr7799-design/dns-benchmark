@@ -5,8 +5,8 @@ import unittest
 import concurrent.futures
 from pathlib import Path
 from unittest.mock import patch
-from fastapi import HTTPException
-from backend.ndc.security import Security,local_address,direct_local
+from fastapi import HTTPException,Request
+from backend.ndc.security import Security,local_address,local_hostname,direct_local
 from backend.ndc.backup import FILES
 
 class SetupTests(unittest.TestCase):
@@ -58,6 +58,27 @@ class SetupTests(unittest.TestCase):
             self.assertTrue(local_address(ip),ip)
         for ip in ("1.1.1.1","169.254.169.254","example.com","0.0.0.0"):
             self.assertFalse(local_address(ip),ip)
+
+    def test_local_hostname_and_source_separation(self):
+        for host in ("casaos.local","DNS-Benchmark.local","casaos.local.","room.server.local","192.168.0.108"):
+            self.assertTrue(local_hostname(host),host)
+        for host in ("local","evil.local.example.com","-bad.local","bad..local","1.1.1.1","example.com"):
+            self.assertFalse(local_hostname(host),host)
+        self.assertFalse(local_address("casaos.local"))
+        def req(peer,host,headers=(),scheme="http"):
+            return Request({"type":"http","method":"GET","path":"/api/auth/session",
+                "root_path":"","scheme":scheme,"server":("127.0.0.1",8080),
+                "client":(peer,12345),"headers":[(b"host",host.encode()),*headers]})
+        sec=Security(self.root)
+        valid=req("192.168.0.25","casaos.local:8099")
+        self.assertTrue(direct_local(valid))
+        self.assertFalse(sec.cookie_secure(valid))
+        self.assertTrue(sec.cookie_secure(req("192.168.0.25","casaos.local:8099",scheme="https")))
+        for denied in (req("8.8.8.8","casaos.local:8099"),
+                       req("192.168.0.25","public.example.com"),
+                       req("192.168.0.25","casaos.local:8099",[(b"x-forwarded-for",b"8.8.8.8")])):
+            self.assertFalse(direct_local(denied))
+            self.assertTrue(sec.cookie_secure(denied))
 
 if __name__=="__main__":
     unittest.main()
