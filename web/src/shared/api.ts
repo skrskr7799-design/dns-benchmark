@@ -10,21 +10,31 @@ export interface Run { endpoints: string[]; count: number; mode: Mode; family: F
 export interface Profile { id: string; name: string; config: Run }
 export interface Status { running: boolean; run_id?: string; state?: string; results: Result[]; done: number; total: number; error?: string }
 export interface History { time: number; results: Result[] }
+export interface Session { authenticated: boolean; csrf: string | null }
+let csrf: string | null = null
+export function setSession(session: Session) { csrf=session.csrf }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init)
+  const headers=new Headers(init?.headers)
+  if(init?.method && !['GET','HEAD'].includes(init.method)){headers.set('X-NDC-Request','1');if(csrf)headers.set('X-CSRF-Token',csrf)}
+  const response = await fetch(path, {...init,headers,credentials:'same-origin'})
+  if(response.status===401 && !path.startsWith('/api/auth/'))window.dispatchEvent(new Event('ndc:unauthorized'))
   if (!response.ok) {
     const body = await response.text()
     throw new Error(body || 'HTTP ' + response.status)
   }
+  if(response.status===204)return undefined as T
   return response.json() as Promise<T>
 }
 export const api = {
+  session: () => request<Session>('/api/auth/session'),
+  login: (password: string) => request<Session>('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})}),
+  logout: () => request<Session>('/api/auth/logout',{method:'POST'}),
   defaults: () => request<string[]>('/api/defaults'),
   status: () => request<Status>('/api/status'),
   history: () => request<History[]>('/api/history'),
   profiles: () => request<Profile[]>('/api/v1/profiles'),
   saveProfile: (name: string, config: Run) => request<Profile>('/api/v1/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,config})}),
-  deleteProfile: async (id: string) => {const r=await fetch('/api/v1/profiles/'+encodeURIComponent(id),{method:'DELETE'});if(!r.ok)throw new Error('HTTP '+r.status)},
+  deleteProfile: (id: string) => request<void>('/api/v1/profiles/'+encodeURIComponent(id),{method:'DELETE'}),
   cancel: (id: string) => request<unknown>('/api/v1/runs/'+encodeURIComponent(id)+'/cancel',{method:'POST'}),
   start: (run: Run) => request<{started: boolean}>('/api/run', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run)})
 }
