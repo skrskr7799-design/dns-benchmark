@@ -9,7 +9,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from backend.ndc.storage import Store
 from backend.ndc.evidence import EvidenceStore
-from backend.ndc.benchmark_evidence import BenchmarkDrain
+from backend.ndc.evidence_drain import EvidenceDrain
 from backend.ndc.jobs import Coordinator
 from backend.ndc.api import router, inspection_slot
 from backend.ndc.monitoring import MonitorStore, MonitorScheduler, Telegram
@@ -30,14 +30,14 @@ async def lifespan(app):
         store.initialize()
         evidence=EvidenceStore(store.path.with_name("intelligence.sqlite"))
         evidence.initialize()
-        drain=BenchmarkDrain(store,evidence)
         app.state.evidence=evidence
-        app.state.evidence_drain=drain
         coordinator=Coordinator(store)
         app.state.store=store
         app.state.coordinator=coordinator
         monitors=MonitorStore(store.path.with_name('monitoring.sqlite'))
         monitors.initialize()
+        drain=EvidenceDrain(store,monitors,evidence)
+        app.state.evidence_drain=drain
         scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent))
         app.state.monitors=monitors
         app.state.monitor_scheduler=scheduler
@@ -88,6 +88,9 @@ def intelligence_status(request: Request):
     return request.app.state.evidence.status() | {
         "benchmark_pending":request.app.state.store.evidence_pending_count(),
         "drain_error":request.app.state.evidence_drain.last_error,
+        "monitor":request.app.state.monitors.evidence_status(),
+        "stream_errors":dict(request.app.state.evidence_drain.errors),
+        "retention_error":request.app.state.evidence_drain.retention_error,
         "retention_days":30}
 
 @app.get("/api/defaults")

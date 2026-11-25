@@ -11,6 +11,7 @@ from pathlib import Path
 import http.client
 import ssl
 from .models import MonitorConfig, Inspect
+from .monitor_evidence import project,encode
 from .probes.connectivity import probe_once
 from .probes.inspector import inspect_one
 
@@ -23,6 +24,7 @@ class MonitorStore:
     def __init__(self,path,clock=time.time):
         self.path=Path(path)
         self.clock=clock
+        self.max_evidence_pending=10000
 
     @contextmanager
     def db(self):
@@ -37,6 +39,9 @@ class MonitorStore:
 
     def initialize(self):
         with self.db() as c:
+            version=c.execute("PRAGMA user_version").fetchone()[0]
+            if version not in (0,1):
+                raise RuntimeError("Unsupported monitoring schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
             CREATE TABLE IF NOT EXISTS monitors(
@@ -57,6 +62,20 @@ class MonitorStore:
                 created REAL NOT NULL, message TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
                 attempts INTEGER NOT NULL DEFAULT 0, next_at REAL NOT NULL);
             """)
+            if version==0:
+                c.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE monitor_evidence_outbox(
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL);
+                CREATE TABLE monitor_evidence_coverage(
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    dropped INTEGER NOT NULL DEFAULT 0,
+                    dropped_transitions INTEGER NOT NULL DEFAULT 0,
+                    first_dropped_at REAL,last_dropped_at REAL);
+                INSERT INTO monitor_evidence_coverage(singleton) VALUES(1);
+                PRAGMA user_version=1;
+                COMMIT;
+                """)
             # Missed checks are not synthesized; a claimed check is retried on next tick.
             c.execute("UPDATE monitors SET running=0,next_at=? WHERE running=1",(self.clock(),))
             c.execute("UPDATE outbox SET state='pending' WHERE state='sending'")
@@ -139,6 +158,7 @@ class MonitorStore:
             c.execute("INSERT INTO observations(monitor_id,at,outcome,latency,payload) VALUES(?,?,?,?,?)",
                       (id,now,outcome,result.get("latency_ms"),json.dumps(result)))
             message=None
+            transition=None
             if outcome=="unknown":
                 good=bad=0
             elif outcome=="healthy":
@@ -147,6 +167,7 @@ class MonitorStore:
                     state="healthy"
                     c.execute("UPDATE incidents SET closed=?,resolution='recovered' WHERE monitor_id=? AND closed IS NULL",(now,id))
                     message="RECOVERY: "+cfg.name
+                    transition="incident.closed"
                 elif state=="unknown":
                     state="healthy"
             else:
@@ -154,7 +175,18 @@ class MonitorStore:
                 if state!="incident" and bad>=cfg.failure_count:
                     state="incident"
                     c.execute("INSERT INTO incidents(monitor_id,opened,reason) VALUES(?,?,?)",(id,now,result.get("reason") or outcome))
+                    transition="incident.opened"
                     message="INCIDENT: "+cfg.name+" — "+(result.get("reason") or outcome)
+            # Keep original monitoring and notifications authoritative at capacity.
+            # A full analytics queue records an explicit coverage gap without consuming a sequence.
+            if c.execute("SELECT count(*) FROM monitor_evidence_outbox").fetchone()[0]>=self.max_evidence_pending:
+                c.execute("""UPDATE monitor_evidence_coverage SET dropped=dropped+1,
+                    dropped_transitions=dropped_transitions+?,first_dropped_at=coalesce(first_dropped_at,?),last_dropped_at=?
+                    WHERE singleton=1""",(int(transition is not None),now,now))
+            else:
+                seq=c.execute("INSERT INTO monitor_evidence_outbox(payload) VALUES('')").lastrowid
+                observation,events=project(id,seq,cfg,result,now,transition)
+                c.execute("UPDATE monitor_evidence_outbox SET payload=? WHERE seq=?",(encode(observation,events),seq))
             if message and cfg.notify:
                 c.execute("INSERT INTO outbox(monitor_id,created,message,next_at) VALUES(?,?,?,?)",(id,now,message[:500],now))
             c.execute("""UPDATE monitors SET running=0,next_at=?,state=?,good=?,bad=?,last_at=?,last_result=? WHERE id=?""",
@@ -163,6 +195,27 @@ class MonitorStore:
             c.execute("DELETE FROM observations WHERE monitor_id=? AND (at<? OR id NOT IN (SELECT id FROM observations WHERE monitor_id=? ORDER BY id DESC LIMIT 10000))",(id,now-30*86400,id))
             c.execute("DELETE FROM incidents WHERE closed IS NOT NULL AND closed<?",(now-180*86400,))
             c.execute("DELETE FROM outbox WHERE state IN ('sent','failed') AND created<?",(now-30*86400,))
+
+    def pending_evidence(self):
+        with self.db() as c:
+            row=c.execute("SELECT seq,payload FROM monitor_evidence_outbox ORDER BY seq LIMIT 1").fetchone()
+            return dict(row) if row else None
+
+    def ack_evidence(self,seq):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row=c.execute("SELECT seq FROM monitor_evidence_outbox ORDER BY seq LIMIT 1").fetchone()
+            if row is None or row[0]!=seq:
+                raise MonitorBusy("Evidence acknowledgement out of order")
+            c.execute("DELETE FROM monitor_evidence_outbox WHERE seq=?",(seq,))
+
+    def evidence_status(self):
+        with self.db() as c:
+            c.execute("BEGIN")
+            row=dict(c.execute("SELECT dropped,dropped_transitions,first_dropped_at,last_dropped_at FROM monitor_evidence_coverage WHERE singleton=1").fetchone())
+            row["pending"]=c.execute("SELECT count(*) FROM monitor_evidence_outbox").fetchone()[0]
+            row["max_pending"]=self.max_evidence_pending
+            return row
 
     def prune(self):
         now=self.clock()
@@ -205,7 +258,7 @@ def check(config):
         ok=r["outcome"]=="answer"
         latency=r["duration_ms"]
         reason=r["error"] or r["outcome"]
-        details={"ip":r["ip"],"rcode":r["rcode"]}
+        details={"ip":r["ip"],"rcode":r["rcode"],"protocol":r.get("protocol")}
     else:
         r=probe_once(config.host,config.port,config.family,config.kind,config.path)
         ok=r["ok"] and (config.kind not in ("http","https") or 200<=r["http_status"]<400)

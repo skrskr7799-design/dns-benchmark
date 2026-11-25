@@ -91,6 +91,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_evidence.py
       - name: Benchmark evidence transactional outbox and replay
         run: docker exec -i benchmark python - < tests/test_benchmark_evidence.py
+      - name: Monitor evidence transitions and independent stream recovery
+        run: docker exec -i benchmark python - < tests/test_monitor_evidence.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

@@ -84,5 +84,6 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | Mobile drawer | implemented / CI passed / merge pending | 4a5121d, 45615833349; actual iOS retest after main publication |
 | NIP-00 | partial | [baseline inventory](NIP-00.md); real acceptance pending |
 | NIP-01A | implemented / CI passed (45631588249) | [contract and derived store](NIP-01.md); source ingestion not enabled |
-| NIP-01B1 | implemented candidate / CI pending | benchmark transactional outbox and drain; [NIP-01](NIP-01.md) |
-| NIP-01B2..13 | planned | monitor/agent adapters, scheduler and consumer modules pending |
+| NIP-01B1 | implemented / CI passed (45636343788) | benchmark transactional outbox and drain; [NIP-01](NIP-01.md) |
+| NIP-01B2 | implemented candidate / CI pending | monitor observation/incident outbox, fair drain and coverage counters |
+| NIP-01B3..13 | planned | agent adapter, capacity policy, scheduler and consumer modules pending |
