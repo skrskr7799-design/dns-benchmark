@@ -27,3 +27,6 @@ h3://basic.rethinkdns.com/
 h3://freedns.controld.com/p0
 h3://doh.tiar.app/dns-query
 h3://unfiltered.joindns4.eu/dns-query
+https://cloudflare-dns.com/dns-query
+https://dns.google/dns-query
+https://dns.quad9.net/dns-query

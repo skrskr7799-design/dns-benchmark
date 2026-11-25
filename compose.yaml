@@ -5,7 +5,7 @@ services:
     ports:
       - "8099:8080"
     volumes:
-      - data:/data
+      - /DATA/AppData/dns-benchmark:/data
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -16,8 +16,6 @@ services:
         - container: "8080"
           description:
             en_us: Web interface
-volumes:
-  data:
 x-casaos:
   title:
     en_us: DNS Benchmark
