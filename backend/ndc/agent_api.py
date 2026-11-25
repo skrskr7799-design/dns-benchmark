@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat
+from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch
 from .agent_store import AgentError
 
 router=APIRouter(prefix="/api/v1/agents")
@@ -41,6 +41,22 @@ def revoke(request:Request,id:str):
 @router.post("/{id}/tasks",status_code=202)
 def enqueue(request:Request,id:str,body:AgentRun):
     return call(store(request).enqueue,id,body)
+
+@router.post("/batches",status_code=202)
+def create_batch(request:Request,body:Batch):
+    return call(store(request).batch,body)
+
+@router.get("/batches")
+def batches(request:Request):
+    return store(request).batches()
+
+@router.get("/batches/{id}")
+def batch_detail(request:Request,id:str):
+    return call(store(request).batch_detail,id)
+
+@router.post("/batches/{id}/cancel")
+def cancel_batch(request:Request,id:str):
+    return call(store(request).cancel_batch,id)
 
 @router.get("/tasks/{id}")
 def detail(request:Request,id:str):
