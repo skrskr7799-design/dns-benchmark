@@ -137,3 +137,19 @@ now 13 screens x 5 sizes (65 initial screenshots). Populated visual QA,
 remaining screens and manual comparison pending. No main merge.
 
 Populated fixture captures added for Providers, Benchmark, History and Inspector at desktop 1536, mobile 390 and compact mobile 320 widths (12 additional planned screenshots). Tests exercise actual endpoint selection transfer, P95 trend, long IPv6 and raw response tab. Fixtures are explicitly separated by artifact directory. Manual visual review remains pending.
+
+## REL-01D — pass 3
+
+Pass 2 f314012 CI 45602883419 verified successful. Artifact 15015434676
+contains 77 PNGs; downloaded and reviewed desktop contact sheet (including
+populated providers, history, benchmark, inspector). Main differences from
+references: spare initial-state connectivity/TLS screens, tall setup forms,
+limited actual telemetry compared with reference mockups. Added connection
+phase and RTT plots, TLS detail/empty state, monitor history plot and status
+chips, agent cards, AdGuard upstream bars, throughput result and Settings.
+Settings actually persists browser-only density and decoration preferences;
+server settings remain read-only. New mobile layout checks, appearance
+persistence test. Initial-state matrix 14 screens × 5 plus 12 populated
+fixture screenshots = 82 planned. No backend changes. Full populated visual
+review, live acceptance and current CI pending. Owner authorized merge only
+once finished; no stable tag or merge while gates remain open.

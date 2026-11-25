@@ -12,15 +12,18 @@ import {Agents} from './features/agents'
 import {Diagnostics} from './features/diagnostics'
 import {Integrations} from './features/integrations'
 import {History} from './features/history'
+import {Settings} from './features/settings'
+import {applyAppearance,readAppearance} from './shared/preferences'
 import {Overview} from './features/overview'
 import {Brand,Icon,Circuit} from './shared/identity'
 import {AuthGate,Logout} from './features/auth'
 import './style.css'
+applyAppearance(readAppearance())
 const client=new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:true}}})
 const navGroups=[
  {title:'WORKSPACE',items:[['/','Overview','overview'],['/benchmark','DNS Benchmark','benchmark'],['/providers','Providers','dns'],['/inspector','DNS Inspector','search'],['/connectivity','Connectivity','route'],['/tls','TLS Inspector','lock'],['/routes','Routes','route'],['/diagnostics','Smart Diagnostics','activity']]},
  {title:'MONITORING',items:[['/monitoring','Monitoring','activity'],['/history','История','history'],['/agents','Agents','agents']]},
- {title:'SYSTEM',items:[['/integrations','Integrations','integrations']]}
+ {title:'SYSTEM',items:[['/integrations','Integrations','integrations'],['/settings','Settings','settings']]}
 ] as const
 function Shell(){
  const [open,setOpen]=useState(false)
@@ -38,7 +41,8 @@ const monitoringRoute=createRoute({getParentRoute:()=>rootRoute,path:'/monitorin
 const agentsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/agents',component:Agents})
 const diagnosticsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/diagnostics',component:Diagnostics})
 const integrationsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/integrations',component:Integrations})
+const settingsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/settings',component:Settings})
 const historyRoute=createRoute({getParentRoute:()=>rootRoute,path:'/history',component:History})
-const router=createRouter({routeTree:rootRoute.addChildren([indexRoute,benchmarkRoute,providersRoute,inspectorRoute,connectivityRoute,tlsRoute,routesRoute,monitoringRoute,agentsRoute,diagnosticsRoute,integrationsRoute,historyRoute]),history:createHashHistory()})
+const router=createRouter({routeTree:rootRoute.addChildren([indexRoute,benchmarkRoute,providersRoute,inspectorRoute,connectivityRoute,tlsRoute,routesRoute,monitoringRoute,agentsRoute,diagnosticsRoute,integrationsRoute,settingsRoute,historyRoute]),history:createHashHistory()})
 declare module '@tanstack/react-router' {interface Register {router:typeof router}}
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><AuthGate><RouterProvider router={router}/></AuthGate></QueryClientProvider>)
