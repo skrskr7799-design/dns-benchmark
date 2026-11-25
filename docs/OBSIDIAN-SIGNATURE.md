@@ -95,3 +95,7 @@ release acceptance evidence. Obtain owner approval for significant deviations.
 
 This commit freezes the design only, does not claim implementation or visual
 acceptance. Existing technical audit remains in progress. No main merge.
+
+## Adjacent design conversation — recovered details (2026-11-25)
+
+The owner asked to incorporate the detailed design map from “Разработка дизайна приложения”. Available conversation retrieval confirms the Obsidian Signature direction, the SVG cube mark, the signature accent **#80D6DF**, cold graphite, matte surfaces, fine borders, reduced corner radii, and P50/P95/P99. The signature accent takes precedence over the approximate #69DDE2 previously proposed; the latter is a provisional secondary bright chart/accent variant, not an owner-approved token. The full design-map answer was not retrievable. Do not treat the remaining approximate palette, font, spacing or component measurements as exact values from that chat. Obtain the complete map before final visual implementation/approval; no visual changes during REL-01B/C.
