@@ -107,3 +107,22 @@ class RouteTarget(NetworkTarget):
     max_hops: int=Field(default=12,ge=1,le=20)
     attempts: int=Field(default=1,ge=1,le=2)
     port: Literal[33434]=33434
+
+class MonitorConfig(Connectivity):
+    name: str=Field(min_length=1,max_length=100)
+    kind: Literal["tcp","http","https","tls","dns"]="tcp"
+    family: Literal["ipv4","ipv6"]="ipv4"
+    count: Literal[1]=1
+    endpoint: str="https://cloudflare-dns.com/dns-query"
+    interval_seconds: int=Field(default=300,ge=60,le=86400)
+    failure_count: int=Field(default=3,ge=1,le=10)
+    recovery_count: int=Field(default=2,ge=1,le=10)
+    latency_ms: float|None=Field(default=None,gt=0,le=60000)
+    expiry_days: int=Field(default=14,ge=1,le=90)
+    enabled: bool=True
+    notify: bool=False
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls,value):
+        return Run(endpoints=[value]).endpoints[0]
