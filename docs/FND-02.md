@@ -11,8 +11,8 @@ and one database owner enforced by OS lock. Queue max 8 including active jobs,
 one active run and up to two probes concurrently. Cancellation is cooperative
 between requests, not guaranteed immediate (including DNS bootstrap).
 SSE sends full snapshots with revision IDs, reconnect refreshes current state;
-no historical event replay. React uses polling plus cancellation, and profiles
-API is available; profile editor and SSE integration are pending. No raw samples,
+no historical event replay. React uses SSE-triggered refresh with polling fallback, cancellation and profile
+save/load/delete controls; profile rename/update is available through API only. No raw samples,
 CSV, scheduler, Alembic or transport correctness changes yet. Additive
 migration uses PRAGMA user_version rather than Alembic at this stage.
 Existing API remains compatible. Endpoint validation is not an authorization
