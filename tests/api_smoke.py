@@ -287,6 +287,31 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
                 a.client.close()
 print("Two-agent batch and offline resume smoke passed")
 
+# Real diagnostic HTTP status evidence, plus scope denial.
+class DiagnosticFixture(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(503)
+        self.end_headers()
+    def log_message(self,*args):
+        pass
+fixture=ThreadingHTTPServer(("127.0.0.1",0),DiagnosticFixture)
+thread=threading.Thread(target=fixture.serve_forever,daemon=True)
+thread.start()
+try:
+    diagnostic=request("/api/v1/diagnostics",{"host":"127.0.0.1","kind":"http","port":fixture.server_port})
+    row=diagnostic["results"][0]
+    assert row["probe"]["ok"] and row["probe"]["http_status"]==503,row
+    assert any(f["code"]=="http_server_error" and f["confidence"]=="observed" for f in row["findings"])
+    assert row["dns_skipped"] and not row["dns"]
+finally:
+    fixture.shutdown()
+    fixture.server_close()
+    thread.join(3)
+blocked=request("/api/v1/diagnostics",{"host":"169.254.169.254","endpoints":["udp://1.1.1.1"]})
+assert blocked["results"][0]["findings"][0]["code"]=="scope_denied"
+assert not blocked["results"][0]["dns"]
+print("Diagnostic evidence API smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
