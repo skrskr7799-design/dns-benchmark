@@ -140,6 +140,14 @@ class AgentStore:
             c.execute("UPDATE tasks SET state='leased',lease=?,lease_until=? WHERE id=?",(digest(lease),until,r["id"]))
             return {"task":{"id":r["id"],"lease":lease,"lease_seconds":300,"config":json.loads(r["config"]),"version":VERSION,"engine":ENGINE}}
 
+    def heartbeat(self,credential,body):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            id=self.identity(c,credential)
+            c.execute("UPDATE agents SET last_seen=?,engine=? WHERE id=?",(self.clock(),body.engine,id))
+            row=c.execute("SELECT 1 FROM tasks WHERE id=? AND agent_id=? AND lease=? AND state='leased' AND lease_until>?",(body.task_id,id,digest(body.lease),self.clock())).fetchone()
+            return {"active":bool(row)}
+
     def complete(self,credential,id,body):
         payload=body.model_dump(exclude={"lease"})
         encoded=json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False)
