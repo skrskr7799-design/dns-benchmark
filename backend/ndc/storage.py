@@ -5,6 +5,8 @@ import time
 import uuid
 from pathlib import Path
 from contextlib import contextmanager
+from .benchmark_evidence import project
+from .evidence import payload
 
 ACTIVE = ("queued", "running", "cancelling")
 TERMINAL = ("completed", "failed", "cancelled", "interrupted")
@@ -19,6 +21,7 @@ class Store:
     def __init__(self, path: Path):
         self.path = path
         self.max_jobs = int(os.getenv("NDC_MAX_JOBS","500"))
+        self.max_evidence_pending=10000
         if not 10<=self.max_jobs<=5000:
             raise ValueError("NDC_MAX_JOBS must be 10–5000")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,7 +42,7 @@ class Store:
         # Single coordinator owns the database. Backup before first additive migration.
         with self.connect() as c:
             version = c.execute("PRAGMA user_version").fetchone()[0]
-            if version > 1:
+            if version > 2:
                 raise RuntimeError("Unsupported database schema")
             if version == 0:
                 if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='runs'").fetchone():
@@ -68,6 +71,16 @@ class Store:
                     PRAGMA user_version=1;
                     COMMIT;
                 """)
+            if version<2:
+                # Existing records are not silently backfilled; new writes only.
+                c.executescript("""
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE benchmark_evidence_outbox(
+                        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                        payload TEXT NOT NULL);
+                    PRAGMA user_version=2;
+                    COMMIT;
+                """)
             c.execute("PRAGMA journal_mode=WAL")
             # Do not silently resume a previously running job.
             c.execute("UPDATE jobs SET status='interrupted', finished=?, error='Process restarted', revision=revision+1 WHERE status IN ('running','cancelling')", (time.time(),))
@@ -80,6 +93,10 @@ class Store:
                 raise Busy("Queue is full or another run is active")
             if c.execute("SELECT count(*) FROM jobs").fetchone()[0]>=self.max_jobs:
                 raise Busy("Run history capacity reached; export and remove old runs")
+            # Reserve 80 result slots for each admitted active job (40 x both).
+            pending=c.execute("SELECT count(*) FROM benchmark_evidence_outbox").fetchone()[0]
+            if pending+80*(n+1)>self.max_evidence_pending:
+                raise Busy("Intelligence backlog capacity reached; check evidence status")
             job_id = uuid.uuid4().hex
             c.execute("INSERT INTO jobs(id,created,status,config) VALUES(?,?,'queued',?)",
                       (job_id,time.time(),json.dumps(config)))
@@ -128,11 +145,33 @@ class Store:
     def add_result(self, job_id, ordinal, result):
         with self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
-            row=c.execute("SELECT status FROM jobs WHERE id=?",(job_id,)).fetchone()
+            row=c.execute("SELECT status,config FROM jobs WHERE id=?",(job_id,)).fetchone()
             if row is None or row[0] not in ("running","cancelling"):
                 raise Busy("Cannot append to terminal or missing run")
+            config=json.loads(row["config"])
+            if type(ordinal) is not int or not 0<=ordinal<len(config["endpoints"])*(2 if config["mode"]=="both" else 1):
+                raise Busy("Invalid result ordinal")
+            record=project(job_id,ordinal,config,result,time.time())
             c.execute("INSERT INTO job_results(job_id,ordinal,payload) VALUES(?,?,?)",(job_id,ordinal,json.dumps(result)))
+            c.execute("INSERT INTO benchmark_evidence_outbox(payload) VALUES(?)",(payload(record),))
             c.execute("UPDATE jobs SET revision=revision+1 WHERE id=?",(job_id,))
+
+    def pending_evidence(self):
+        with self.connect() as c:
+            row=c.execute("SELECT seq,payload FROM benchmark_evidence_outbox ORDER BY seq LIMIT 1").fetchone()
+            return dict(row) if row else None
+
+    def ack_evidence(self,seq):
+        with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row=c.execute("SELECT seq FROM benchmark_evidence_outbox ORDER BY seq LIMIT 1").fetchone()
+            if row is None or row[0]!=seq:
+                raise Busy("Evidence acknowledgement out of order")
+            c.execute("DELETE FROM benchmark_evidence_outbox WHERE seq=?",(seq,))
+
+    def evidence_pending_count(self):
+        with self.connect() as c:
+            return c.execute("SELECT count(*) FROM benchmark_evidence_outbox").fetchone()[0]
 
     def cancel(self, job_id):
         with self.connect() as c:

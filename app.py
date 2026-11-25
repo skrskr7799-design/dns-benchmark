@@ -2,12 +2,14 @@ import os
 import fcntl
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from backend.ndc.storage import Store
+from backend.ndc.evidence import EvidenceStore
+from backend.ndc.benchmark_evidence import BenchmarkDrain
 from backend.ndc.jobs import Coordinator
 from backend.ndc.api import router, inspection_slot
 from backend.ndc.monitoring import MonitorStore, MonitorScheduler, Telegram
@@ -26,6 +28,11 @@ async def lifespan(app):
         app.state.security=Security(store.path.parent)
         allowed_networks()
         store.initialize()
+        evidence=EvidenceStore(store.path.with_name("intelligence.sqlite"))
+        evidence.initialize()
+        drain=BenchmarkDrain(store,evidence)
+        app.state.evidence=evidence
+        app.state.evidence_drain=drain
         coordinator=Coordinator(store)
         app.state.store=store
         app.state.coordinator=coordinator
@@ -38,12 +45,14 @@ async def lifespan(app):
         app.state.agents.initialize()
         coordinator.start()
         scheduler.start()
+        drain.start()
         try:
             yield
         finally:
             scheduler.stop()
             coordinator.stop()
-            if coordinator.thread.is_alive() or scheduler.thread.is_alive():
+            drain.stop()
+            if coordinator.thread.is_alive() or scheduler.thread.is_alive() or drain.thread.is_alive():
                 # Do not release ownership while outstanding IO can still write.
                 os._exit(1)
 
@@ -73,6 +82,13 @@ def home():
 @app.get("/health")
 def health():
     return {"ok":True}
+
+@app.get("/api/v1/intelligence/status")
+def intelligence_status(request: Request):
+    return request.app.state.evidence.status() | {
+        "benchmark_pending":request.app.state.store.evidence_pending_count(),
+        "drain_error":request.app.state.evidence_drain.last_error,
+        "retention_days":30}
 
 @app.get("/api/defaults")
 def defaults():
