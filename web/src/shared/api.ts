@@ -43,6 +43,10 @@ export interface RemoteSeries {mode:'cold'|'warm';ip:string|null;protocols:strin
 export interface BatchMember {id:string;agent_id:string;name:string;location:string;state:string;online:boolean;created:number;finished:number|null;last_seen:number|null;error:string|null;results:RemoteSeries[]}
 export interface BatchDetail {id:string;created:number;config:Run;members:BatchMember[]}
 export interface BatchRequest {request_id:string;agent_ids:string[];config:Run}
+export interface DiagnosticThresholds {dns_ms:number;connect_ms:number;handshake_ms:number;ttfb_ms:number}
+export interface DiagnosticConfig extends NetTarget {kind:'tcp'|'http'|'https'|'tls';path:string;endpoints:string[];resolver_family:Family;thresholds:DiagnosticThresholds}
+export interface Finding {code:string;layer:string;confidence:'observed'|'possible';evidence:Record<string,unknown>;action:string}
+export interface DiagnosticReport {rule_version:string;host:string;port:number;kind:string;vantage:string;started_at:number;finished_at:number;thresholds:DiagnosticThresholds;results:{family:string;probe:NetworkProbe;dns:InspectionResult[];dns_skipped:string|null;dns_agreement:boolean|null;findings:Finding[]}[];limitations:string[]}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -59,6 +63,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
+  diagnose:(config:DiagnosticConfig)=>request<DiagnosticReport>('/api/v1/diagnostics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   agents:()=>request<AgentOverview>('/api/v1/agents'),
   inviteAgent:(name:string,location:string)=>request<AgentInvite>('/api/v1/agents/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,location})}),
   rotateAgent:(id:string)=>request<AgentInvite>('/api/v1/agents/'+encodeURIComponent(id)+'/rotate',{method:'POST'}),
