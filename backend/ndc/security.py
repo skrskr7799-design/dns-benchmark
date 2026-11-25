@@ -1,3 +1,5 @@
+import asyncio
+import stat
 import hashlib
 import re
 import hmac
@@ -21,6 +23,12 @@ class Credentials(BaseModel):
 class Security:
     def __init__(self, data_dir):
         path=Path(data_dir)/"owner-password"
+        if path.is_symlink():
+            raise RuntimeError("owner-password must not be a symlink")
+        if path.exists():
+            info=path.stat()
+            if not stat.S_ISREG(info.st_mode) or info.st_mode&0o077 or info.st_size>4096:
+                raise RuntimeError("owner-password must be a private regular file (0600)")
         password=path.read_text().rstrip("\r\n") if path.exists() else os.getenv("NDC_OWNER_PASSWORD","")
         if not 16<=len(password)<=256:
             raise RuntimeError("Configure owner-password in DATA_DIR (16–256 characters)")
@@ -90,10 +98,30 @@ class Security:
         with self.lock:
             self.sessions.pop(self.key(request.cookies.get(COOKIE,"")),None)
 
+def matches_csrf(value,expected):
+    return hmac.compare_digest(value.encode("utf-8"),expected.encode("utf-8"))
+
+async def bounded_body(request):
+    data=bytearray()
+    try:
+        async with asyncio.timeout(10):
+            async for chunk in request.stream():
+                if len(data)+len(chunk)>131072:
+                    return JSONResponse({"detail":"Request too large"},413)
+                data.extend(chunk)
+    except TimeoutError:
+        return JSONResponse({"detail":"Request body timeout"},408)
+    request._body=bytes(data)
+    return None
+
 async def guard(request,call_next):
     path=request.url.path
     if not path.startswith("/api/"):
-        return await call_next(request)
+        response=await call_next(request)
+        response.headers["X-Content-Type-Options"]="nosniff"
+        response.headers["X-Frame-Options"]="DENY"
+        response.headers["Referrer-Policy"]="no-referrer"
+        return response
     security=request.app.state.security
     machine=bool(re.fullmatch(r"/api/v1/agents/machine/(?:enroll|poll|heartbeat|results/[a-f0-9]{32})",path)) and request.method=="POST"
     if machine:
@@ -102,12 +130,9 @@ async def guard(request,call_next):
             return JSONResponse({"detail":"Agent rate limit"},429)
         if request.headers.get("origin") or request.cookies.get(COOKIE):
             return JSONResponse({"detail":"Machine credentials only"},403)
-        body=bytearray()
-        async for chunk in request.stream():
-            body.extend(chunk)
-            if len(body)>131072:
-                return JSONResponse({"detail":"Request too large"},413)
-        request._body=bytes(body)
+        failure=await bounded_body(request)
+        if failure is not None:
+            return failure
         response=await call_next(request)
         response.headers["Cache-Control"]="no-store"
         return response
@@ -122,17 +147,14 @@ async def guard(request,call_next):
         if path=="/api/auth/login":
             if request.headers.get("x-ndc-request")!="1":
                 return JSONResponse({"detail":"Missing login request header"},403)
-        elif not csrf or not hmac.compare_digest(request.headers.get("x-csrf-token",""),csrf):
+        elif not csrf or not matches_csrf(request.headers.get("x-csrf-token",""),csrf):
             return JSONResponse({"detail":"CSRF rejected"},403)
         if path!="/api/auth/login" and not security.limit(security.writes,60):
             return JSONResponse({"detail":"Write rate limit"},429)
         # Bound JSON bodies even for chunked requests.
-        body=bytearray()
-        async for chunk in request.stream():
-            body.extend(chunk)
-            if len(body)>131072:
-                return JSONResponse({"detail":"Request too large"},413)
-        request._body=bytes(body)
+        failure=await bounded_body(request)
+        if failure is not None:
+            return failure
     response=await call_next(request)
     response.headers["Cache-Control"]="no-store"
     response.headers["X-Content-Type-Options"]="nosniff"
