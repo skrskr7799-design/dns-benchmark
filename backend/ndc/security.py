@@ -41,8 +41,17 @@ def local_address(value):
     except ValueError:
         return False
 
+def local_hostname(value):
+    host=value.lower().rstrip(".")
+    if local_address(host):
+        return True
+    # .local is a destination name, never proof of a private source address.
+    return len(host)<=253 and host.endswith(".local") and all(
+        re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",label)
+        for label in host.split("."))
+
 def direct_local(request):
-    return bool(request.client and local_address(request.client.host) and local_address(request.url.hostname or '') and not any(h in request.headers for h in ('forwarded','x-forwarded-for','x-forwarded-host','x-forwarded-proto','x-real-ip')))
+    return bool(request.client and local_address(request.client.host) and local_hostname(request.url.hostname or '') and not any(h in request.headers for h in ('forwarded','x-forwarded-for','x-forwarded-host','x-forwarded-proto','x-real-ip')))
 
 def private_file(path):
     if path.is_symlink():

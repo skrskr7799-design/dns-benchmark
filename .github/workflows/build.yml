@@ -120,6 +120,9 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8081/health && break; sleep 1; done
           curl -fsS http://127.0.0.1:8081/health
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/defaults)" = 401
+          curl -fsS -H "Host: casaos.local:8081" http://127.0.0.1:8081/api/auth/session | jq -e '.setup_available == true'
+          curl -fsS -H "Host: casaos.local.example.com:8081" http://127.0.0.1:8081/api/auth/session | jq -e '.setup_available == false'
+          curl -fsS -H "Host: casaos.local:8081" -H "X-Forwarded-For: 8.8.8.8" http://127.0.0.1:8081/api/auth/session | jq -e '.setup_available == false'
       - name: Browser first-run setup
         working-directory: web
         env:
