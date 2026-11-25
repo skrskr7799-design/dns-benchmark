@@ -1,0 +1,23 @@
+name: dns-benchmark-preview-diag01
+services:
+  benchmark:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-diag-01
+    ports:
+      - "8111:8080"
+    volumes:
+      - /DATA/AppData/dns-benchmark-preview-diag01:/data
+    environment:
+      NDC_SECURE_COOKIE: "0"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+x-casaos:
+  title:
+    en_us: Network Diagnostics DIAG-01
+  category: Network
+  port_map: "8111"
+  scheme: http
+  index: /
+  main: benchmark
