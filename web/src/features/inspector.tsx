@@ -1,20 +1,23 @@
 import {useState} from 'react'
 import {useMutation} from '@tanstack/react-query'
 import {api,type Family,type Inspection,type InspectionResult,type RRset} from '../shared/api'
+import {Icon} from '../shared/identity'
 import {fmt} from '../shared/results'
 const types=['A','AAAA','CNAME','MX','TXT','NS','SOA','CAA','PTR','SRV','HTTPS','SVCB','DS','DNSKEY','RRSIG']
 const labels:Record<string,string>={answer:'Ответ',no_data:'Нет записи',nxdomain:'NXDOMAIN',dns_error:'Ошибка DNS',transport_error:'Ошибка транспорта',truncated:'Усечённый ответ',alias_only:'Только CNAME',referral:'Referral'}
 function Section({name,rows}:{name:string;rows:RRset[]}){
- return <details open={name==='Answer'} className="dns-section"><summary>{name} · {rows.length}</summary>{rows.length?<div className="table-wrap"><table><thead><tr><th>Имя</th><th>Тип / класс</th><th>TTL, с</th><th>Значение</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i}><td>{r.name}</td><td>{r.type} / {r.class}</td><td>{r.ttl}</td><td>{r.values.map((v,j)=><div className="dns-value" key={j}>{v}</div>)}</td></tr>)}</tbody></table></div>:<p className="muted">Нет записей.</p>}</details>
+ return <details open={name==='Answer'} className="dns-section"><summary>{name} · {rows.length}</summary>{rows.length?<div className="table-wrap"><table><thead><tr><th>Имя</th><th>Тип / класс</th><th>TTL, с</th><th>Значение</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i}><td>{r.name}</td><td><span className={'record-chip record-'+r.type.toLowerCase()}>{r.type}</span> / {r.class}</td><td>{r.ttl}</td><td>{r.values.map((v,j)=><div className="dns-value" key={j}>{v}</div>)}</td></tr>)}</tbody></table></div>:<p className="muted">Нет записей.</p>}</details>
 }
 function Resolver({r}:{r:InspectionResult}){
+ const [tab,setTab]=useState<'records'|'raw'>("records")
+ const counts=Array.from(new Set(r.answer.map(x=>x.type))).map(t=>[t,r.answer.filter(x=>x.type===t).reduce((a,x)=>a+x.values.length,0)] as const)
  return <section className="panel dns-result"><div className="section-title"><h2 className="dns-value">{r.endpoint}</h2><span className={'status '+(r.outcome==='answer'?'ok':r.error?'fail':'partial')}>{labels[r.outcome]??r.outcome}</span></div>
  <div className="dns-meta"><div><small>IP / протокол</small><b>{r.ip??'—'} · {r.protocol??'—'}</b><small>Peer: {r.peer_ip??'—'}</small></div><div><small>Запрос, мс</small><b>{fmt(r.duration_ms)}</b><small>Bootstrap: {fmt(r.bootstrap_ms)} мс</small></div><div><small>RCODE</small><b>{r.rcode??'—'}</b><small>Группа: {r.comparison_group??'—'}</small></div></div>
  {r.error&&<p className="error">{r.error}</p>}{r.fallback&&<p>UDP → TCP: ответ был усечён.</p>}
  <p>Флаги: {r.flags.join(' · ')||'—'} · EDNS: {r.edns?'v'+r.edns.version+' / '+r.edns.payload+' B':'—'}</p>
  {r.dnssec&&<p>DNSSEC: DO запроса {r.dnssec.requested_do?'1':'0'} · DO ответа {r.dnssec.response_do?'1':'0'} · AD {r.dnssec.ad?'1':'0'} · CD {r.dnssec.cd?'1':'0'}. Проверка цепочки доверия не выполнялась.</p>}
  {r.cname_chain.length>0&&<div className="dns-value"><b>CNAME в ответе</b>{r.cname_chain.map((c,i)=><div key={i}>{c.name} → {c.target}</div>)}</div>}
- <Section name="Answer" rows={r.answer}/><Section name="Authority" rows={r.authority}/><Section name="Additional" rows={r.additional}/></section>
+ <div className="inspector-layout"><div><div className="view-tabs" aria-label="Вид ответа"><button className="secondary" aria-pressed={tab==='records'} onClick={()=>setTab("records")}><Icon name="dns"/> Records</button><button className="secondary" aria-pressed={tab==='raw'} onClick={()=>setTab("raw")}>Raw response</button></div>{tab==='records'?<><Section name="Answer" rows={r.answer}/><Section name="Authority" rows={r.authority}/><Section name="Additional" rows={r.additional}/></>:<pre className="agent-json">{JSON.stringify(r,null,2)}</pre>}</div><div className="inspector-summary"><h3>Record summary</h3>{counts.length?counts.map(([t,n])=><div className="history-row" key={t}><span className={'record-chip record-'+t.toLowerCase()}>{t}</span><b>{n}</b></div>):<p>Нет записей Answer.</p>}<h3>Resolver details</h3><p className="dns-value">{r.ip??'—'} · {r.protocol??'—'}</p><p>DNSSEC AD: {r.dnssec?r.dnssec.ad?'1':'0':'—'}</p><small>Независимая валидация не выполнялась.</small></div></div></section>
 }
 function download(result:Inspection){const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='dns-inspection.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 export function Inspector(){

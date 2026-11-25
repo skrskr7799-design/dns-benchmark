@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client'
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import {createRootRoute,createRoute,createRouter,createHashHistory,RouterProvider,Outlet,Link} from '@tanstack/react-router'
 import {Benchmark} from './features/benchmark'
+import {Providers} from './features/providers'
 import {Inspector} from './features/inspector'
 import {Connectivity,TLSInspector} from './features/network'
 import {Routes} from './features/routes'
@@ -17,7 +18,7 @@ import {AuthGate,Logout} from './features/auth'
 import './style.css'
 const client=new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:true}}})
 const navGroups=[
- {title:'WORKSPACE',items:[['/','Overview','overview'],['/benchmark','DNS Benchmark','benchmark'],['/inspector','DNS Inspector','search'],['/connectivity','Connectivity','route'],['/tls','TLS Inspector','lock'],['/routes','Routes','route'],['/diagnostics','Smart Diagnostics','activity']]},
+ {title:'WORKSPACE',items:[['/','Overview','overview'],['/benchmark','DNS Benchmark','benchmark'],['/providers','Providers','dns'],['/inspector','DNS Inspector','search'],['/connectivity','Connectivity','route'],['/tls','TLS Inspector','lock'],['/routes','Routes','route'],['/diagnostics','Smart Diagnostics','activity']]},
  {title:'MONITORING',items:[['/monitoring','Monitoring','activity'],['/history','История','history'],['/agents','Agents','agents']]},
  {title:'SYSTEM',items:[['/integrations','Integrations','integrations']]}
 ] as const
@@ -28,6 +29,7 @@ function Shell(){
 const rootRoute=createRootRoute({component:Shell})
 const indexRoute=createRoute({getParentRoute:()=>rootRoute,path:'/',component:Overview})
 const benchmarkRoute=createRoute({getParentRoute:()=>rootRoute,path:'/benchmark',component:Benchmark})
+const providersRoute=createRoute({getParentRoute:()=>rootRoute,path:'/providers',component:Providers})
 const inspectorRoute=createRoute({getParentRoute:()=>rootRoute,path:'/inspector',component:Inspector})
 const connectivityRoute=createRoute({getParentRoute:()=>rootRoute,path:'/connectivity',component:Connectivity})
 const tlsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/tls',component:TLSInspector})
@@ -37,6 +39,6 @@ const agentsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/agents',compo
 const diagnosticsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/diagnostics',component:Diagnostics})
 const integrationsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/integrations',component:Integrations})
 const historyRoute=createRoute({getParentRoute:()=>rootRoute,path:'/history',component:History})
-const router=createRouter({routeTree:rootRoute.addChildren([indexRoute,benchmarkRoute,inspectorRoute,connectivityRoute,tlsRoute,routesRoute,monitoringRoute,agentsRoute,diagnosticsRoute,integrationsRoute,historyRoute]),history:createHashHistory()})
+const router=createRouter({routeTree:rootRoute.addChildren([indexRoute,benchmarkRoute,providersRoute,inspectorRoute,connectivityRoute,tlsRoute,routesRoute,monitoringRoute,agentsRoute,diagnosticsRoute,integrationsRoute,historyRoute]),history:createHashHistory()})
 declare module '@tanstack/react-router' {interface Register {router:typeof router}}
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><AuthGate><RouterProvider router={router}/></AuthGate></QueryClientProvider>)

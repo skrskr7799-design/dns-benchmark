@@ -120,3 +120,18 @@ manual visual comparison and screenshot approval pending. Further passes:
 providers catalog, deeper inspector/history/diagnostics composition,
 remaining module refinement and responsive QA. No claim of pixel-perfect
 match or complete design-map retrieval. No backend or main changes.
+
+## REL-01D — pass 2
+
+Pass 1 CI eb1a6ae / 45602198781 verified successful, screenshot artifact
+15016461341 exists (not yet manually reviewed). Providers added from actual
+API defaults, endpoint configuration labels rather than inferred support;
+current/last series metrics, search/filter/sort and selected endpoints passed
+to Benchmark via existing local storage after explicit action. No auto-run.
+Inspector records/raw tabs, answer counts and resolver details; Diagnostics
+phase tiles, observation/hypothesis counts and manual checks; History session
+list and P95 trend for matching endpoint/mode/IP/engine/family/protocol/count.
+History plot X is session order, gaps for missing or failed series, not a
+continuous time series. No new backend functionality. Responsive matrix
+now 13 screens x 5 sizes (65 initial screenshots). Populated visual QA,
+remaining screens and manual comparison pending. No main merge.
