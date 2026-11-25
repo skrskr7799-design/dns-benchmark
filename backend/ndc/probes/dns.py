@@ -2,7 +2,7 @@ import time, statistics, math, socket, ssl, httpx
 from urllib.parse import urlsplit
 from contextlib import ExitStack
 from collections import Counter
-import dns.message, dns.query, dns.rcode, dns.quic
+import dns.message, dns.query, dns.rcode, dns.quic, dns.flags
 from ..scope import validate_ip
 from .quic_transport import QuicSession
 import os
@@ -16,10 +16,12 @@ def resolve(u, family):
     checked=[validate_ip(a[4][0]) for a in addresses]
     return checked[0]
 
-def query(endpoint, domain, ip, stack, resources):
+def query(endpoint, domain, ip, stack, resources, *, qtype='A', dnssec=False, checking_disabled=False):
     u = urlsplit(endpoint)
     ip = validate_ip(ip)
-    q = dns.message.make_query(domain, "A")
+    q = dns.message.make_query(domain, qtype, want_dnssec=True if dnssec else None)
+    if checking_disabled:
+        q.flags |= dns.flags.CD
     if u.scheme in ("h3","quic"):
         if "session" not in resources:
             resources["session"]=stack.enter_context(QuicSession(endpoint,ip))
