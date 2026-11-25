@@ -70,7 +70,7 @@ hosts. Revoke/rotate restored agent credentials if backup predates changes.
    and Go comparison; measure resource use, validate cancellation/timeouts.
 5. Two real VPS through verified HTTPS private overlay; offline/revoke tests.
 6. Live AdGuard/Telegram only with owner authorization and credentials.
-7. UI visual polish and real responsive screenshots; accessibility review.
+7. UI implementation must follow the owner-approved [Obsidian Signature](OBSIDIAN-SIGNATURE.md) reference contract; real responsive screenshots and accessibility review.
 8. Explicit owner approval of main merge, immutable release tag and rollback.
 
 This pass does not satisfy these gates yet. No deployment, public exposure,
