@@ -34,6 +34,8 @@ class Target:
         host=NetworkTarget(host=u.hostname).host
         if host!=u.hostname:
             raise ValueError("Use canonical ASCII host")
+        if u.port is not None and not 1<=u.port<=65535:
+            raise ValueError("Invalid port")
         self.ip=validate_ip(cfg["ip"])
         try:
             literal=ipaddress.ip_address(host)
@@ -75,7 +77,7 @@ def read_json(target,path):
         return value
 
 def number(v):
-    return v if type(v) in (float,int) and math.isfinite(v) and 0<=v<=1e15 else None
+    return v if type(v) in (float,int) and 0<=v<=1e15 and math.isfinite(v) else None
 
 def safe_upstream(value):
     # Strip paths, query parameters, user info and conditional domain names.
