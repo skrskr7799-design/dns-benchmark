@@ -1,4 +1,6 @@
-# Delivery roadmap
+# Delivery roadmap (historical foundation plan)
+
+For the next generation, see [Network Intelligence Platform](NETWORK-INTELLIGENCE-ROADMAP.md). The original plan below is preserved as historical context; its status statements are not a current implementation inventory.
 
 All stages are planned, not implemented. Deliver small accepted slices;
 no main merge without owner approval. Each stage includes tests and notes.
