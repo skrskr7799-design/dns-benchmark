@@ -1,5 +1,5 @@
 import json, socket, threading, time, sqlite3, urllib.request
-import dns.message, dns.rrset
+import dns.message, dns.rrset, dns.flags, dns.rdatatype
 import os, http.cookiejar, urllib.error
 opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 csrf=''
@@ -100,6 +100,31 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
     thread.join(2)
     assert not thread.is_alive()
 print("Both, samples pagination, CSV and JSON smoke passed")
+
+# Real inspector wire query, including qtype, DO and CD.
+with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+    sock.bind(("127.0.0.1",0))
+    port=sock.getsockname()[1]
+    sock.settimeout(10)
+    def respond_inspect():
+        data,peer=sock.recvfrom(65535)
+        q=dns.message.from_wire(data)
+        assert q.question[0].rdtype==dns.rdatatype.AAAA
+        assert q.ednsflags&dns.flags.DO and q.flags&dns.flags.CD
+        r=dns.message.make_response(q)
+        r.flags|=dns.flags.AD
+        r.answer.append(dns.rrset.from_text(q.question[0].name,42,"IN","AAAA","2001:db8::1"))
+        sock.sendto(r.to_wire(),peer)
+    thread=threading.Thread(target=respond_inspect,daemon=True)
+    thread.start()
+    result=request("/api/v1/dns/inspect",{"name":"example.com","qtype":"AAAA","dnssec":True,"checking_disabled":True,"endpoints":[f"udp://127.0.0.1:{port}"]})
+    row=result["results"][0]
+    assert row["outcome"]=="answer" and row["answer"][0]["ttl"]==42,row
+    assert row["answer"][0]["values"]==["2001:db8::1"]
+    assert row["dnssec"]["ad"] and not row["dnssec"]["independently_validated"]
+    thread.join(2)
+    assert not thread.is_alive()
+print("DNS inspector wire smoke passed")
 
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
