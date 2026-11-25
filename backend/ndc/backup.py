@@ -15,7 +15,7 @@ from pathlib import Path
 from contextlib import contextmanager
 
 DATABASES=("history.sqlite","monitoring.sqlite","agents.sqlite")
-FILES=DATABASES+("owner-password","telegram-token","adguard.json","throughput.json")
+FILES=DATABASES+("owner-password","owner-account.json","telegram-token","adguard.json","throughput.json")
 
 @contextmanager
 def ownership(root):
