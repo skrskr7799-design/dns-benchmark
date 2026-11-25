@@ -38,3 +38,16 @@ with sqlite3.connect("/data/history.sqlite") as db:
     db.execute("INSERT INTO runs(payload) VALUES (?)", (json.dumps(legacy),))
 assert request("/api/history")[0] == legacy
 print("Local UDP and legacy history smoke passed")
+
+assert request("/api/v1/capabilities")["durable_runs"]
+job_id = request("/api/status")["run_id"]
+assert request("/api/v1/runs/"+job_id)["status"] == "completed"
+with urllib.request.urlopen("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
+    assert b"event: snapshot" in response.read()
+profile=request("/api/v1/profiles",{"name":"smoke","config":{"endpoints":["udp://127.0.0.1"],"count":2}})
+assert request("/api/v1/profiles")[0]["id"]==profile["id"]
+req=urllib.request.Request("http://127.0.0.1:8080/api/v1/profiles/"+profile["id"],method="DELETE")
+with urllib.request.urlopen(req,timeout=10) as response:
+    assert response.status==204
+assert request("/api/v1/profiles")==[]
+print("v1 API, SSE and profiles smoke passed")
