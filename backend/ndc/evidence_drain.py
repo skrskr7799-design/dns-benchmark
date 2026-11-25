@@ -4,13 +4,16 @@ import threading
 import time
 from .evidence import Observation
 from .benchmark_evidence import STREAM as BENCHMARK_STREAM
-from .monitor_evidence import STREAM as MONITOR_STREAM,decode
+from .monitor_evidence import STREAM as MONITOR_STREAM,decode as decode_monitor
+from .agent_evidence import STREAM as AGENT_STREAM,decode as decode_agent
 
 log=logging.getLogger(__name__)
 
 class EvidenceDrain:
-    def __init__(self,benchmark,monitor,evidence,clock=time.time):
-        self.sources={BENCHMARK_STREAM:(benchmark,self.decode_benchmark),MONITOR_STREAM:(monitor,decode)}
+    def __init__(self,benchmark,monitor,evidence,clock=time.time,*,agent=None):
+        self.sources={BENCHMARK_STREAM:(benchmark,self.decode_benchmark),MONITOR_STREAM:(monitor,self.decode_monitor)}
+        if agent is not None:
+            self.sources[AGENT_STREAM]=(agent,decode_agent)
         self.evidence=evidence
         self.clock=clock
         self.stop_event=threading.Event()
@@ -22,7 +25,12 @@ class EvidenceDrain:
 
     @staticmethod
     def decode_benchmark(raw):
-        return Observation.model_validate_json(raw),()
+        return (Observation.model_validate_json(raw),),()
+
+    @staticmethod
+    def decode_monitor(raw):
+        observation,events=decode_monitor(raw)
+        return (observation,),events
 
     @property
     def last_error(self):
@@ -33,8 +41,8 @@ class EvidenceDrain:
         row=source.pending_evidence()
         if row is None:
             return False
-        observation,events=decoder(row["payload"])
-        self.evidence.ingest(stream,row["seq"],(observation,),events)
+        observations,events=decoder(row["payload"])
+        self.evidence.ingest(stream,row["seq"],observations,events)
         if after_commit:
             after_commit()
         source.ack_evidence(row["seq"])

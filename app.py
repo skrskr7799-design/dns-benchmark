@@ -36,13 +36,13 @@ async def lifespan(app):
         app.state.coordinator=coordinator
         monitors=MonitorStore(store.path.with_name('monitoring.sqlite'))
         monitors.initialize()
-        drain=EvidenceDrain(store,monitors,evidence)
-        app.state.evidence_drain=drain
         scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent))
         app.state.monitors=monitors
         app.state.monitor_scheduler=scheduler
         app.state.agents=AgentStore(store.path.with_name('agents.sqlite'))
         app.state.agents.initialize()
+        drain=EvidenceDrain(store,monitors,evidence,agent=app.state.agents)
+        app.state.evidence_drain=drain
         coordinator.start()
         scheduler.start()
         drain.start()
@@ -89,6 +89,7 @@ def intelligence_status(request: Request):
         "benchmark_pending":request.app.state.store.evidence_pending_count(),
         "drain_error":request.app.state.evidence_drain.last_error,
         "monitor":request.app.state.monitors.evidence_status(),
+        "agent":request.app.state.agents.evidence_status(),
         "stream_errors":dict(request.app.state.evidence_drain.errors),
         "retention_error":request.app.state.evidence_drain.retention_error,
         "retention_days":30}

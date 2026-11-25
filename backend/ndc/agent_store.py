@@ -9,6 +9,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from .agent_contract import ENGINE, VERSION, AgentRun
+from .agent_evidence import records,encode
 
 class AgentError(Exception):
     def __init__(self,status,message):
@@ -23,6 +24,7 @@ def secret():
 class AgentStore:
     def __init__(self,path,clock=time.time):
         self.path=path;self.clock=clock
+        self.max_evidence_pending=10000
 
     @contextmanager
     def db(self):
@@ -37,6 +39,9 @@ class AgentStore:
 
     def initialize(self):
         with self.db() as c:
+            version=c.execute("PRAGMA user_version").fetchone()[0]
+            if version not in (0,1):
+                raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
             CREATE TABLE IF NOT EXISTS agents(
@@ -53,6 +58,42 @@ class AgentStore:
             CREATE TABLE IF NOT EXISTS agent_audit(
                 id INTEGER PRIMARY KEY,at REAL NOT NULL,agent_id TEXT NOT NULL,event TEXT NOT NULL);
             """)
+
+            if version==0:
+                c.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE agent_evidence_outbox(
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT,payload TEXT NOT NULL);
+                CREATE TABLE agent_evidence_coverage(
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    dropped_tasks INTEGER NOT NULL DEFAULT 0,
+                    dropped_observations INTEGER NOT NULL DEFAULT 0,
+                    first_dropped_at REAL,last_dropped_at REAL);
+                INSERT INTO agent_evidence_coverage(singleton) VALUES(1);
+                PRAGMA user_version=1;
+                COMMIT;
+                """)
+
+    def pending_evidence(self):
+        with self.db() as c:
+            row=c.execute("SELECT seq,payload FROM agent_evidence_outbox ORDER BY seq LIMIT 1").fetchone()
+            return dict(row) if row else None
+
+    def ack_evidence(self,seq):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row=c.execute("SELECT seq FROM agent_evidence_outbox ORDER BY seq LIMIT 1").fetchone()
+            if row is None or row[0]!=seq:
+                raise AgentError(409,"Evidence acknowledgement out of order")
+            c.execute("DELETE FROM agent_evidence_outbox WHERE seq=?",(seq,))
+
+    def evidence_status(self):
+        with self.db() as c:
+            c.execute("BEGIN")
+            result=dict(c.execute("SELECT dropped_tasks,dropped_observations,first_dropped_at,last_dropped_at FROM agent_evidence_coverage WHERE singleton=1").fetchone())
+            result["pending"]=c.execute("SELECT count(*) FROM agent_evidence_outbox").fetchone()[0]
+            result["max_pending"]=self.max_evidence_pending
+            return result
 
     def audit(self,c,id,event):
         c.execute("INSERT INTO agent_audit(at,agent_id,event) VALUES(?,?,?)",(self.clock(),id,event))
@@ -240,7 +281,18 @@ class AgentStore:
                 raise AgentError(409,"Lease expired or task already finalized")
             cfg=AgentRun.model_validate_json(r["config"])
             validate_result(cfg,body)
-            c.execute("UPDATE tasks SET state=?,finished=?,payload=?,payload_hash=? WHERE id=?",(body.status,self.clock(),encoded,ph,id))
+            now=self.clock()
+            c.execute("UPDATE tasks SET state=?,finished=?,payload=?,payload_hash=? WHERE id=?",(body.status,now,encoded,ph,id))
+            # Preserve accepted remote results under analytics backpressure.
+            # Both modes are one batch: never store only half of a task.
+            if c.execute("SELECT count(*) FROM agent_evidence_outbox").fetchone()[0]>=self.max_evidence_pending:
+                c.execute("""UPDATE agent_evidence_coverage SET dropped_tasks=dropped_tasks+1,
+                    dropped_observations=dropped_observations+?,first_dropped_at=coalesce(first_dropped_at,?),last_dropped_at=?
+                    WHERE singleton=1""",(len(body.results) if body.status=="completed" else 1,now,now))
+            else:
+                member=c.execute("SELECT batch_id FROM batch_members WHERE task_id=?",(id,)).fetchone()
+                observations=records(id,agent,member[0] if member else None,cfg,body)
+                c.execute("INSERT INTO agent_evidence_outbox(payload) VALUES(?)",(encode(observations),))
             c.execute("UPDATE agents SET last_seen=? WHERE id=?",(self.clock(),agent))
             return {"accepted":True,"duplicate":False}
 

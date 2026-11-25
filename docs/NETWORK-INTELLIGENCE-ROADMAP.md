@@ -85,5 +85,6 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-00 | partial | [baseline inventory](NIP-00.md); real acceptance pending |
 | NIP-01A | implemented / CI passed (45631588249) | [contract and derived store](NIP-01.md); source ingestion not enabled |
 | NIP-01B1 | implemented / CI passed (45636343788) | benchmark transactional outbox and drain; [NIP-01](NIP-01.md) |
-| NIP-01B2 | implemented candidate / CI pending | monitor observation/incident outbox, fair drain and coverage counters |
-| NIP-01B3..13 | planned | agent adapter, capacity policy, scheduler and consumer modules pending |
+| NIP-01B2 | implemented / CI passed (45647219921) | monitor observation/incident outbox, fair drain and coverage counters |
+| NIP-01B3 | implemented candidate / CI pending | agent result outbox, sample-derived metrics and three-stream drain |
+| NIP-01C..13 | planned | capacity policy, scheduler and consumer modules pending |
