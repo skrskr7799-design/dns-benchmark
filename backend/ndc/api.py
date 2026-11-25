@@ -52,7 +52,7 @@ def legacy_history(request: Request):
 def capabilities():
     return {"api_version":1,"engine":"python-dns02","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"authenticated":True}
+            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"monitoring":True,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
