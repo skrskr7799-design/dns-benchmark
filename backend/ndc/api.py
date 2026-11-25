@@ -5,7 +5,8 @@ import io
 import threading
 from fastapi import APIRouter, HTTPException, Request, Response, Query
 from fastapi.responses import StreamingResponse
-from .models import Run, Profile, Inspect, NetworkTarget, Connectivity
+from .models import Run, Profile, Inspect, NetworkTarget, Connectivity, RouteTarget
+from .probes.routes import trace, route_capabilities
 from .probes.connectivity import connectivity, inspect_tls, ping_capabilities
 from .probes.inspector import inspect
 from .storage import Busy, TERMINAL
@@ -51,7 +52,7 @@ def legacy_history(request: Request):
 def capabilities():
     return {"api_version":1,"engine":"python-dns02","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"authenticated":True}
+            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
@@ -172,5 +173,14 @@ def check_tls(request: Request, body: NetworkTarget):
         raise HTTPException(409,"Interactive diagnostic already running")
     try:
         return inspect_tls(body)
+    finally:
+        inspection_slot.release()
+
+@router.post("/api/v1/network/routes")
+def check_routes(request: Request, body: RouteTarget):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"Interactive diagnostic already running")
+    try:
+        return trace(body)
     finally:
         inspection_slot.release()
