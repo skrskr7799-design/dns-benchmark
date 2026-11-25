@@ -312,6 +312,12 @@ assert blocked["results"][0]["findings"][0]["code"]=="scope_denied"
 assert not blocked["results"][0]["dns"]
 print("Diagnostic evidence API smoke passed")
 
+# Integrations disabled by default; no outbound network activity.
+assert request("/api/v1/integrations")=={"adguard_configured":False,"throughput_configured":False}
+for path in ("adguard","throughput"):
+    expect_error(urllib.request.Request(base+"/api/v1/integrations/"+path,data=b'{}',headers={"Content-Type":"application/json","X-CSRF-Token":csrf}),409)
+print("Opt-in integration API smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
