@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result
+from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat
 from .agent_store import AgentError
 
 router=APIRouter(prefix="/api/v1/agents")
@@ -63,3 +63,7 @@ def poll(request:Request,body:Heartbeat):
 @router.post("/machine/results/{id}")
 def complete(request:Request,id:str,body:Result):
     return call(store(request).complete,credential(request),id,body)
+
+@router.post("/machine/heartbeat")
+def heartbeat(request:Request,body:ActiveHeartbeat):
+    return call(store(request).heartbeat,credential(request),body)
