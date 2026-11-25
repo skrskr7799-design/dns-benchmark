@@ -8,6 +8,9 @@ from contextlib import contextmanager
 ACTIVE = ("queued", "running", "cancelling")
 TERMINAL = ("completed", "failed", "cancelled", "interrupted")
 
+def summary(result):
+    return {k:v for k,v in result.items() if k!='samples'}
+
 class Busy(Exception):
     pass
 
@@ -85,7 +88,7 @@ class Store:
             c.execute("UPDATE jobs SET status='running',started=?,revision=revision+1 WHERE id=?", (time.time(),row["id"]))
             return row["id"]
 
-    def get(self, job_id):
+    def get(self, job_id, raw=False):
         with self.connect() as c:
             c.execute("BEGIN")
             r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -95,7 +98,9 @@ class Store:
             job["config"] = json.loads(job["config"])
             job["results"] = [json.loads(x[0]) for x in c.execute("SELECT payload FROM job_results WHERE job_id=? ORDER BY ordinal",(job_id,))]
             job["done"] = sum(x["count"] == x.get("requested_count",x["count"]) for x in job["results"])
-            job["total"] = len(job["config"]["endpoints"])
+            job["total"] = len(job["config"]["endpoints"]) * (2 if job["config"]["mode"]=="both" else 1)
+            if not raw:
+                job["results"]=[summary(x) for x in job["results"]]
             return job
 
     def latest_id(self):
@@ -138,7 +143,7 @@ class Store:
             legacy_id = None
             if status == "completed":
                 results = [json.loads(x[0]) for x in c.execute("SELECT payload FROM job_results WHERE job_id=? ORDER BY ordinal",(job_id,))]
-                legacy_id = c.execute("INSERT INTO runs(payload) VALUES(?)",(json.dumps({"time":time.time(),"results":results}),)).lastrowid
+                legacy_id = c.execute("INSERT INTO runs(payload) VALUES(?)",(json.dumps({"time":time.time(),"run_id":job_id,"results":[summary(x) for x in results]}),)).lastrowid
             c.execute("UPDATE jobs SET status=?,finished=?,error=?,legacy_id=?,revision=revision+1 WHERE id=?",(status,time.time(),error,legacy_id,job_id))
 
     def history(self):
