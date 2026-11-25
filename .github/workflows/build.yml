@@ -1,24 +1,63 @@
 name: Build
 on:
   push:
-    branches: [main, work/v0.2]
+    branches: [main, 'work/**']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
   packages: write
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Resolve frontend dependencies
+        working-directory: web
+        run: |
+          if [ ! -f package-lock.json ]; then npm install --package-lock-only; fi
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-lockfile
+          path: web/package-lock.json
       - run: docker build -t dns-benchmark:test .
-      - run: |
+      - name: Start test container
+        run: |
           docker run -d --name benchmark -p 127.0.0.1:8080:8080 dns-benchmark:test
-          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/health
           curl -fsS http://127.0.0.1:8080/api/defaults
           docker exec benchmark python -c 'import dns.query; print(dns.query.HTTPVersion.H3)'
-      - if: github.ref == 'refs/heads/main'
+      - name: Browser smoke
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npm test
+      - name: Deterministic API and legacy history smoke
+        run: docker exec -i benchmark python - < tests/api_smoke.py
+      - name: Container logs
+        if: failure()
+        run: docker logs benchmark || true
+      - name: Publish image
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          docker tag dns-benchmark:test ghcr.io/skrskr7799-design/dns-benchmark:edge
-          docker push ghcr.io/skrskr7799-design/dns-benchmark:edge
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TAG=edge
+          else
+            TAG=preview-fnd-01
+          fi
+          IMAGE=ghcr.io/skrskr7799-design/dns-benchmark
+          docker tag dns-benchmark:test "$IMAGE:$TAG"
+          docker tag dns-benchmark:test "$IMAGE:sha-${{ github.sha }}"
+          docker push "$IMAGE:sha-${{ github.sha }}"
+          docker push "$IMAGE:$TAG"
