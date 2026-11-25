@@ -168,7 +168,30 @@ req=urllib.request.Request(base+"/api/v1/monitoring/monitors/"+monitor["id"],met
 with opener.open(req,timeout=10) as response:
     assert response.status==204
 assert request("/api/v1/monitoring")["monitors"]==[]
-print("Monitoring API smoke passed")
+# Exercise the actual scheduler and real TCP/HTTP fixture, not only CRUD.
+http_fixture=ThreadingHTTPServer(("127.0.0.1",0),HeadFixture)
+thread=threading.Thread(target=http_fixture.serve_forever,daemon=True)
+thread.start()
+try:
+    active=request("/api/v1/monitoring/monitors",{"name":"active smoke","host":"127.0.0.1","port":http_fixture.server_port,"kind":"http","interval_seconds":60})
+    mid=active["id"]
+    for _ in range(100):
+        observations=request("/api/v1/monitoring/monitors/"+mid+"/history")
+        if observations:
+            break
+        time.sleep(.1)
+    assert len(observations)==1 and observations[0]["outcome"]=="healthy",observations
+    req=urllib.request.Request(base+"/api/v1/monitoring/monitors/"+mid,method="PATCH",data=b'{"enabled":false}',headers={"Content-Type":"application/json","X-CSRF-Token":csrf})
+    with opener.open(req,timeout=10) as response:
+        assert json.load(response)["enabled"] is False
+    req=urllib.request.Request(base+"/api/v1/monitoring/monitors/"+mid,method="DELETE",headers={"X-CSRF-Token":csrf})
+    with opener.open(req,timeout=10) as response:
+        assert response.status==204
+finally:
+    http_fixture.shutdown()
+    http_fixture.server_close()
+    thread.join(3)
+print("Monitoring API and live scheduler smoke passed")
 
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
