@@ -68,6 +68,38 @@ with opener.open(req,timeout=10) as response:
     assert response.status==204
 assert request("/api/v1/profiles")==[]
 print("v1 API, SSE and profiles smoke passed")
+page=request("/api/v1/runs/"+job_id+"/samples?offset=1&limit=1")
+assert page["total"]==2 and len(page["items"])==1 and page["items"][0]["index"]==1
+assert "samples" not in request("/api/v1/runs/"+job_id)["results"][0]
+assert len(request("/api/v1/runs/"+job_id+"/export")["results"][0]["samples"])==2
+with opener.open(base+"/api/v1/runs/"+job_id+"/export?format=csv",timeout=10) as response:
+    assert len(response.read().decode().splitlines())==3
+with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+    sock.bind(("127.0.0.1",0))
+    port=sock.getsockname()[1]
+    sock.settimeout(10)
+    def respond_both():
+        for _ in range(5):
+            data,peer=sock.recvfrom(65535)
+            q=dns.message.from_wire(data)
+            r=dns.message.make_response(q)
+            r.answer.append(dns.rrset.from_text(q.question[0].name,60,"IN","A","192.0.2.1"))
+            sock.sendto(r.to_wire(),peer)
+    thread=threading.Thread(target=respond_both,daemon=True)
+    thread.start()
+    both_id=request("/api/v1/runs",{"endpoints":[f"udp://127.0.0.1:{port}"],"count":2,"mode":"both"})["id"]
+    for _ in range(100):
+        both=request("/api/v1/runs/"+both_id)
+        if both["status"]=="completed":
+            break
+        time.sleep(.1)
+    assert both["status"]=="completed" and both["done"]==both["total"]==2,both
+    assert [r["mode"] for r in both["results"]]==["cold","warm"]
+    assert all(r["ok"]==2 for r in both["results"])
+    assert request("/api/v1/runs/"+both_id+"/samples")["total"]==4
+    thread.join(2)
+    assert not thread.is_alive()
+print("Both, samples pagination, CSV and JSON smoke passed")
 
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
