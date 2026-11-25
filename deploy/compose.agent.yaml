@@ -1,0 +1,19 @@
+name: ndc-agent
+services:
+  agent:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-dist-01
+    command: ["python","-m","backend.ndc.agent_client"]
+    environment:
+      NDC_CONTROLLER_URL: "${NDC_CONTROLLER_URL:?Set verified HTTPS controller origin}"
+      NDC_AGENT_CA_FILE: "${NDC_AGENT_CA_FILE:-}"
+      NDC_ALLOWED_CIDRS: "${NDC_ALLOWED_CIDRS:-}"
+    volumes:
+      - ./agent-data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
