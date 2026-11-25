@@ -116,9 +116,9 @@ class Store:
                 CASE WHEN status IN ('queued','running','cancelling') THEN created ELSE -created END,id LIMIT 1""").fetchone()
             return row[0] if row else None
 
-    def list(self, limit=30):
+    def list(self, limit=30, offset=0):
         with self.connect() as c:
-            rows = c.execute("SELECT id,status,created,started,finished,error,revision FROM jobs ORDER BY created DESC LIMIT ?",(limit,)).fetchall()
+            rows = c.execute("SELECT id,status,created,started,finished,error,revision FROM jobs ORDER BY created DESC,id LIMIT ? OFFSET ?",(limit,offset)).fetchall()
             return [dict(r) for r in rows]
 
     def add_result(self, job_id, ordinal, result):
