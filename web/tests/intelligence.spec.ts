@@ -48,6 +48,14 @@ test('DNS Intelligence real route and deterministic UI states',async({page},info
   await page.setViewportSize({width,height})
   await expect(page.getByRole('heading',{name:'Рейтинг DNS'})).toBeVisible()
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  if(width<=480){
+   const layout=await page.locator('.intel-recommendation').evaluate(el=>{
+    const rect=el.getBoundingClientRect(),content=el.children[1].getBoundingClientRect(),score=el.children[2].getBoundingClientRect()
+    return {ratio:content.width/rect.width,stacked:content.top>=score.bottom-1}
+   })
+   expect(layout.ratio).toBeGreaterThan(.8)
+   expect(layout.stacked).toBe(true)
+  }
   await page.screenshot({path:info.outputPath('intelligence-fixture',width+'x'+height+'.png'),fullPage:true,animations:'disabled'})
  }
  fail=true

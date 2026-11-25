@@ -90,6 +90,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-01C1 | implemented / CI passed (45650114432) | source allocations, pressure retention and authenticated read API |
 | NIP-01C2 | implemented / CI passed (45650846494) | comparable DNS cohorts and bounded coverage-aware read API |
 | NIP-02A | implemented / CI passed (45652543280) | [DNS Intelligence scoring](NIP-02.md), matched local runs and recommendation gates |
-| NIP-02B | implemented / CI failed (45656832678) | DNS Intelligence UI, real ranking API, responsive fixture tests |
-| NIP-02C1 | implemented candidate / CI pending | accessible filter fix, controlled UDP-to-ranking acceptance, backup replay |
-| NIP-02C2..13 | planned | confirm CI, visual review, remaining modules; physical budget and shared scheduler hardening remain open |
+| NIP-02B | implemented / repaired and verified (45658906221) | DNS Intelligence UI, real ranking API, responsive fixture tests |
+| NIP-02C1 | implemented / CI passed (45658906221) | accessible filter fix, controlled UDP-to-ranking acceptance, backup replay |
+| NIP-02C2 | implemented candidate / CI pending | reviewed ten DNS Intelligence screenshots; compact mobile layout repair and regression |
+| NIP-03..13 | planned | Observatory next after C2 acceptance; physical budget and shared scheduler hardening remain open |
