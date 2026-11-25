@@ -37,6 +37,8 @@ jobs:
           curl -fsS http://127.0.0.1:8080/health
           curl -fsS http://127.0.0.1:8080/api/defaults
           docker exec benchmark python -c 'import dns.query; print(dns.query.HTTPVersion.H3)'
+      - name: Persistent job lifecycle tests
+        run: docker exec -i benchmark python - < tests/test_jobs.py
       - name: Browser smoke
         working-directory: web
         run: |
@@ -48,11 +50,13 @@ jobs:
         if: failure()
         run: docker logs benchmark || true
       - name: Publish image
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react')
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TAG=edge
+          elif [ "${{ github.ref }}" = "refs/heads/work/fnd-02-backend" ]; then
+            TAG=preview-fnd-02
           else
             TAG=preview-fnd-01
           fi
