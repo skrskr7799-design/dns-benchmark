@@ -8,7 +8,8 @@ from contextlib import ExitStack
 from collections import Counter
 from typing import Literal
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 app = FastAPI()
@@ -97,8 +98,15 @@ def worker(run):
     finally:
         with lock: state["running"] = False
 
+web_dist = Path(__file__).with_name("web-dist")
+if (web_dist / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=web_dist / "assets"), name="assets")
+
 @app.get("/", response_class=HTMLResponse)
-def home(): return Path(__file__).with_name("index.html").read_text()
+def home():
+    if (web_dist / "index.html").is_file():
+        return FileResponse(web_dist / "index.html")
+    return Path(__file__).with_name("index.html").read_text()
 @app.get("/health")
 def health(): return {"ok":True}
 @app.get("/api/defaults")
