@@ -45,7 +45,7 @@ def legacy_history(request: Request):
 def capabilities():
     return {"api_version":1,"engine":"legacy-v0.2","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"authenticated":False}
+            "h3_reuse_verified":False,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
@@ -73,7 +73,7 @@ async def events(request: Request, job_id: str):
     async def stream():
         revision=None
         idle=0
-        while not await request.is_disconnected():
+        while not await request.is_disconnected() and request.app.state.security.session(request):
             job=await asyncio.to_thread(store.get,job_id)
             if job is None:
                 return
