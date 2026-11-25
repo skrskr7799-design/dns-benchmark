@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -17,6 +18,9 @@ class Busy(Exception):
 class Store:
     def __init__(self, path: Path):
         self.path = path
+        self.max_jobs = int(os.getenv("NDC_MAX_JOBS","500"))
+        if not 10<=self.max_jobs<=5000:
+            raise ValueError("NDC_MAX_JOBS must be 10–5000")
         path.parent.mkdir(parents=True, exist_ok=True)
 
     @contextmanager
@@ -74,6 +78,8 @@ class Store:
             n = c.execute("SELECT count(*) FROM jobs WHERE status IN ('queued','running','cancelling')").fetchone()[0]
             if n >= 8 or (legacy and n):
                 raise Busy("Queue is full or another run is active")
+            if c.execute("SELECT count(*) FROM jobs").fetchone()[0]>=self.max_jobs:
+                raise Busy("Run history capacity reached; export and remove old runs")
             job_id = uuid.uuid4().hex
             c.execute("INSERT INTO jobs(id,created,status,config) VALUES(?,?,'queued',?)",
                       (job_id,time.time(),json.dumps(config)))
@@ -146,6 +152,19 @@ class Store:
                 legacy_id = c.execute("INSERT INTO runs(payload) VALUES(?)",(json.dumps({"time":time.time(),"run_id":job_id,"results":[summary(x) for x in results]}),)).lastrowid
             c.execute("UPDATE jobs SET status=?,finished=?,error=?,legacy_id=?,revision=revision+1 WHERE id=?",(status,time.time(),error,legacy_id,job_id))
 
+    def delete_run(self,job_id):
+        with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            r=c.execute("SELECT status,legacy_id FROM jobs WHERE id=?",(job_id,)).fetchone()
+            if r is None:
+                return False
+            if r["status"] not in TERMINAL:
+                raise Busy("Cannot remove active run")
+            c.execute("DELETE FROM jobs WHERE id=?",(job_id,))
+            if r["legacy_id"] is not None:
+                c.execute("DELETE FROM runs WHERE id=?",(r["legacy_id"],))
+            return True
+
     def history(self):
         with self.connect() as c:
             return [json.loads(x[0]) for x in c.execute("SELECT payload FROM runs ORDER BY id DESC LIMIT 30")]
@@ -156,11 +175,14 @@ class Store:
 
     def put_profile(self, value, profile_id=None):
         with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
             if profile_id:
                 cursor=c.execute("UPDATE profiles SET name=?,config=?,updated=? WHERE id=?",(value["name"],json.dumps(value["config"]),time.time(),profile_id))
                 if not cursor.rowcount:
                     return None
             else:
+                if c.execute("SELECT count(*) FROM profiles").fetchone()[0]>=100:
+                    raise Busy("Profile capacity reached")
                 profile_id=uuid.uuid4().hex
                 c.execute("INSERT INTO profiles VALUES(?,?,?,?)",(profile_id,value["name"],json.dumps(value["config"]),time.time()))
         return {"id":profile_id,**value}
