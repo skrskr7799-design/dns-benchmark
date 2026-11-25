@@ -63,8 +63,8 @@ def create_run(request: Request, body: Run):
     return {"id":submit(request,body)}
 
 @router.get("/api/v1/runs")
-def list_runs(request: Request):
-    return services(request)[0].list()
+def list_runs(request: Request, offset: int=Query(0,ge=0,le=5000)):
+    return services(request)[0].list(offset=offset)
 
 @router.get("/api/v1/runs/{job_id}")
 def run_detail(request: Request, job_id: str):
