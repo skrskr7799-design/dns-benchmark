@@ -2,7 +2,7 @@ import threading
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from .storage import ACTIVE
-from .probes.dns import measure
+from .probes.dns import measure, measure_both
 
 log = logging.getLogger(__name__)
 
@@ -76,9 +76,13 @@ class Coordinator:
                 if item is None:
                     return
                 ordinal,endpoint=item
-                result=self.probe(endpoint,cfg["count"],cfg["mode"],cfg["family"],cancelled)
-                if result is not None:
-                    self.store.add_result(job_id,ordinal,result)
+                if cfg["mode"]=="both":
+                    for offset,result in enumerate(measure_both(endpoint,cfg["count"],cfg["family"],cancelled)):
+                        self.store.add_result(job_id,ordinal*2+offset,result)
+                else:
+                    result=self.probe(endpoint,cfg["count"],cfg["mode"],cfg["family"],cancelled)
+                    if result is not None:
+                        self.store.add_result(job_id,ordinal,result)
         try:
             with ThreadPoolExecutor(max_workers=cfg["parallel"]) as pool:
                 futures=[pool.submit(worker) for _ in range(cfg["parallel"])]
