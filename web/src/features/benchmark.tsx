@@ -1,0 +1,24 @@
+import {useEffect,useState} from 'react'
+import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
+import {api,type Mode,type Family} from '../shared/api'
+import {Results} from '../shared/results'
+export function useStatus(){return useQuery({queryKey:['status'],queryFn:api.status,refetchInterval:q=>q.state.data?.running?1000:3000})}
+function saved():string|null{try{return localStorage.getItem('ndc.endpoints')}catch{return null}}
+export function Benchmark(){
+  const client=useQueryClient(), defaults=useQuery({queryKey:['defaults'],queryFn:api.defaults})
+  const status=useStatus(), [endpoints,setEndpoints]=useState<string|null>(saved)
+  const [count,setCount]=useState(10),[mode,setMode]=useState<Mode>('cold'),[family,setFamily]=useState<Family>('ipv4'),[parallel,setParallel]=useState(1)
+  const value=endpoints??defaults.data?.join('\n')??''
+  const targets=value.split('\n').map(x=>x.trim()).filter(Boolean)
+  useEffect(()=>{if(endpoints!==null)try{localStorage.setItem('ndc.endpoints',endpoints)}catch{/* storage optional */}},[endpoints])
+  const start=useMutation({mutationFn:api.start,onSuccess:async()=>{await client.invalidateQueries({queryKey:['status']});await client.invalidateQueries({queryKey:['history']})}})
+  const running=status.data?.running??false, disabled=running||start.isPending||!status.isSuccess||targets.length===0||targets.length>40||!Number.isInteger(count)||count<1||count>100
+  return <><header className="page-heading"><div><div className="eyebrow">NETWORK TOOLS / DNS</div><h1>DNS Benchmark</h1><p>Сравнение резолверов из текущей точки сети.</p></div><span className="tag">Legacy engine · v0.2</span></header>
+  <section className="panel"><div className="section-title"><h2>Параметры тестирования</h2><button className="secondary" disabled={running||!defaults.data} onClick={()=>setEndpoints(defaults.data!.join('\n'))}>Список по умолчанию</button></div>
+  <label htmlFor="endpoints">DNS-адреса · {targets.length}/40</label><textarea id="endpoints" value={value} onChange={e=>setEndpoints(e.target.value)} disabled={running} rows={8} spellCheck={false}/>
+  <div className="form-grid"><label>Запросов<input type="number" min={1} max={100} value={count} onChange={e=>setCount(Number(e.target.value))} disabled={running}/></label><label>Режим<select value={mode} onChange={e=>setMode(e.target.value as Mode)} disabled={running}><option value="cold">Cold</option><option value="warm">Warm</option></select></label><label>Сеть<select value={family} onChange={e=>setFamily(e.target.value as Family)} disabled={running}><option value="ipv4">IPv4</option><option value="ipv6">IPv6</option><option value="auto">Auto</option></select></label><label>Потоки<select value={parallel} onChange={e=>setParallel(Number(e.target.value))} disabled={running}><option value={1}>1 · последовательно</option><option value={2}>2 · параллельно</option></select></label></div>
+  <div className="controls"><button disabled={disabled} onClick={()=>start.mutate({endpoints:targets,count,mode,family,parallel})}>{running?'Тест выполняется…':start.isPending?'Запуск…':'Запустить тест'}</button><small>HTTP/3: переиспользование соединений пока не подтверждено.</small></div>
+  {(status.isError||defaults.isError||start.isError||status.data?.error)&&<p role="alert" className="error">{start.error?.message||status.error?.message||defaults.error?.message||status.data?.error}</p>}
+  {status.data&&status.data.total>0&&<div className="progress"><progress max={status.data.total} value={status.data.done}/><small role="status">{status.data.done} / {status.data.total} серверов</small></div>}</section>
+  <Results rows={status.data?.results??[]}/></>
+}
