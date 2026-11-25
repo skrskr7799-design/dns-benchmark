@@ -12,6 +12,8 @@ def expect_error(req,code):
         raise AssertionError('Expected HTTP '+str(code))
 base='http://127.0.0.1:8080'
 expect_error(urllib.request.Request(base+'/api/status'),401)
+expect_error(urllib.request.Request(base+'/api/v1/intelligence/observations'),401)
+expect_error(urllib.request.Request(base+'/api/v1/intelligence/events'),401)
 login=urllib.request.Request(base+'/api/auth/login',data=json.dumps({'password':os.environ['NDC_OWNER_PASSWORD']}).encode(),headers={'Content-Type':'application/json','X-NDC-Request':'1'})
 with opener.open(login,timeout=10) as response:
     csrf=json.load(response)['csrf']
@@ -59,6 +61,18 @@ print("Local UDP and legacy history smoke passed")
 assert request("/api/v1/capabilities")["durable_runs"]
 job_id = request("/api/status")["run_id"]
 assert request("/api/v1/runs/"+job_id)["status"] == "completed"
+for _ in range(100):
+    evidence=request("/api/v1/intelligence/observations?source=benchmark&limit=200")
+    item=next((x for x in evidence["items"] if x["record"]["run_id"]==job_id),None)
+    if item: break
+    time.sleep(.1)
+assert item is not None
+assert request("/api/v1/intelligence/observations/"+item["id"])==item
+assert request("/api/v1/intelligence/status")["sources"]["benchmark"]["rows"]>=1
+expect_error(urllib.request.Request(base+"/api/v1/intelligence/observations?limit=201"),422)
+expect_error(urllib.request.Request(base+"/api/v1/intelligence/events?outcome=success"),422)
+expect_error(urllib.request.Request(base+"/api/v1/intelligence/events/"+"0"*64),404)
+print("Authenticated intelligence read API and real benchmark ingestion passed")
 with opener.open("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
     assert b"event: snapshot" in response.read()
 profile=request("/api/v1/profiles",{"name":"smoke","config":{"endpoints":["udp://127.0.0.1"],"count":2}})

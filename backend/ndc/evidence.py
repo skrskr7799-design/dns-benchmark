@@ -10,7 +10,7 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Key = Annotated[str, Field(min_length=1,max_length=128,pattern=r"^[A-Za-z0-9_.:-]+$")]
@@ -110,14 +110,21 @@ class Conflict(Exception):
 class Capacity(Exception):
     pass
 
+SOURCE_KINDS=frozenset(get_args(Source))
+# Runtime partitions reserve capacity across producers. Future adapters need an explicit allocation.
+RUNTIME_QUOTAS={"benchmark":(15000,10066329),"monitor":(25000,16777216),"agent":(10000,6710887)}
+
 class EvidenceStore:
-    def __init__(self,path,*,max_rows=50000,max_bytes=32*1024*1024,clock=time.time):
+    def __init__(self,path,*,max_rows=50000,max_bytes=32*1024*1024,clock=time.time,quotas=None):
         if not 1<=max_rows<=500000 or not 1024<=max_bytes<=256*1024*1024:
             raise ValueError("Invalid evidence limits")
         self.path=Path(path)
         self.max_rows=max_rows
         self.max_bytes=max_bytes
         self.clock=clock
+        self.quotas=dict(quotas or {})
+        if any(k not in SOURCE_KINDS or type(r) is not int or type(b) is not int or r<1 or b<1 for k,(r,b) in self.quotas.items()) or sum(x[0] for x in self.quotas.values())>max_rows or sum(x[1] for x in self.quotas.values())>max_bytes:
+            raise ValueError("Invalid source quotas")
 
     @contextmanager
     def db(self):
@@ -134,7 +141,7 @@ class EvidenceStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1):
+            if version not in (0,1,2):
                 raise RuntimeError("Unsupported intelligence schema")
             if version==0:
                 c.executescript("""
@@ -171,7 +178,62 @@ class EvidenceStore:
                 PRAGMA user_version=1;
                 COMMIT;
                 """)
+            if version<2:
+                c.executescript("""
+                BEGIN IMMEDIATE;
+                ALTER TABLE observations ADD COLUMN source_kind TEXT GENERATED ALWAYS AS (json_extract(payload,'$.source_kind')) VIRTUAL;
+                ALTER TABLE events ADD COLUMN source_kind TEXT GENERATED ALWAYS AS (json_extract(payload,'$.source_kind')) VIRTUAL;
+                CREATE INDEX observations_source_seq ON observations(source_kind,seq);
+                CREATE INDEX events_source_seq ON events(source_kind,seq);
+                CREATE TABLE source_usage(
+                    source_kind TEXT PRIMARY KEY, rows INTEGER NOT NULL CHECK(rows>=0),
+                    bytes INTEGER NOT NULL CHECK(bytes>=0),
+                    evicted INTEGER NOT NULL DEFAULT 0, last_evicted_at REAL);
+                INSERT INTO source_usage(source_kind,rows,bytes)
+                    SELECT source_kind,count(*),sum(size) FROM
+                    (SELECT source_kind,size FROM observations UNION ALL SELECT source_kind,size FROM events)
+                    GROUP BY source_kind;
+                CREATE TRIGGER source_observation_insert AFTER INSERT ON observations BEGIN
+                    INSERT INTO source_usage(source_kind,rows,bytes) VALUES(NEW.source_kind,1,NEW.size)
+                    ON CONFLICT(source_kind) DO UPDATE SET rows=rows+1,bytes=bytes+NEW.size; END;
+                CREATE TRIGGER source_observation_delete AFTER DELETE ON observations BEGIN
+                    UPDATE source_usage SET rows=rows-1,bytes=bytes-OLD.size WHERE source_kind=OLD.source_kind; END;
+                CREATE TRIGGER source_event_insert AFTER INSERT ON events BEGIN
+                    INSERT INTO source_usage(source_kind,rows,bytes) VALUES(NEW.source_kind,1,NEW.size)
+                    ON CONFLICT(source_kind) DO UPDATE SET rows=rows+1,bytes=bytes+NEW.size; END;
+                CREATE TRIGGER source_event_delete AFTER DELETE ON events BEGIN
+                    UPDATE source_usage SET rows=rows-1,bytes=bytes-OLD.size WHERE source_kind=OLD.source_kind; END;
+                PRAGMA user_version=2;
+                COMMIT;
+                """)
             c.execute("PRAGMA journal_mode=WAL")
+
+    def make_room(self,c,source,size,now,protected,budget):
+        if not self.quotas:
+            return
+        if source not in self.quotas:
+            raise Capacity("Source has no allocation")
+        max_rows,max_bytes=self.quotas[source]
+        if size>max_bytes:
+            raise Capacity("Record exceeds source allocation")
+        while True:
+            row=c.execute("SELECT rows,bytes FROM source_usage WHERE source_kind=?",(source,)).fetchone()
+            rows,used=tuple(row) if row else (0,0)
+            if rows+1<=max_rows and used+size<=max_bytes:
+                return
+            if source!="monitor" or budget[0]<=0:
+                raise Capacity("Source allocation reached")
+            # Only unreferenced monitor observations, never events or current batch evidence.
+            candidates=c.execute("""SELECT id FROM observations o WHERE source_kind='monitor'
+                AND NOT EXISTS (SELECT 1 FROM event_evidence e WHERE e.observation_id=o.id)
+                ORDER BY seq LIMIT 101""").fetchall()
+            victim=next((r[0] for r in candidates if r[0] not in protected),None)
+            if victim is None:
+                raise Capacity("Monitor allocation contains protected evidence")
+            c.execute("DELETE FROM observations WHERE id=?",(victim,))
+            c.execute("UPDATE source_usage SET evicted=evicted+1,last_evicted_at=? WHERE source_kind='monitor'",(now,))
+            budget[0]-=1
+
 
     def ingest(self,stream,position,observations=(),events=()):
         # A stream has exactly one durable producer, position starts at 1.
@@ -202,6 +264,8 @@ class EvidenceStore:
             if row is None and c.execute("SELECT count(*) FROM cursors").fetchone()[0]>=256:
                 raise Capacity("Stream capacity reached")
             inserted=0
+            protected={x[0] for x in obs}|{ref for x in ev for ref in x[2]}
+            eviction_budget=[64]
             for table,items,stamp in (("observations",obs,"received_at"),("events",ev,"recorded_at")):
                 for item in items:
                     id,data=item[:2]
@@ -211,6 +275,8 @@ class EvidenceStore:
                             raise Conflict("Immutable evidence identity conflict")
                         continue
                     size=len(data.encode("ascii"))
+                    source=json.loads(data)["source_kind"]
+                    self.make_room(c,source,size,now,protected,eviction_budget)
                     usage=c.execute("SELECT rows,bytes FROM usage WHERE singleton=1").fetchone()
                     if usage[0]+1>self.max_rows or usage[1]+size>self.max_bytes:
                         raise Capacity("Evidence capacity reached; apply explicit retention")
@@ -224,18 +290,67 @@ class EvidenceStore:
             c.execute("INSERT INTO cursors VALUES(?,?,?) ON CONFLICT(stream) DO UPDATE SET position=excluded.position,batch_digest=excluded.batch_digest",(stream,position,batch))
             return {"replayed":False,"position":position,"inserted":inserted}
 
-    def page(self,kind,*,after=0,limit=100):
-        if kind not in ("observations","events") or type(after) is not int or after<0 or type(limit) is not int or not 1<=limit<=200:
+    @staticmethod
+    def item(r,stamp):
+        return {"seq":r["seq"],"id":r["id"],stamp:r[stamp],"record":json.loads(r["payload"])}
+
+    def page(self,kind,*,after=0,limit=100,until=None,source=None,vantage=None,probe=None,outcome=None,since=None,before=None):
+        if kind not in ("observations","events") or type(after) is not int or not 0<=after<=9223372036854775807 or type(limit) is not int or not 1<=limit<=200:
             raise ValueError("Invalid evidence page")
+        if until is not None and (type(until) is not int or not after<=until<=9223372036854775807):
+            raise ValueError("Invalid upper cursor")
+        if source is not None and source not in SOURCE_KINDS:
+            raise ValueError("Invalid source")
+        if kind=="events" and any(x is not None for x in (vantage,probe,outcome)):
+            raise ValueError("Observation-only filter")
+        if any(x is not None and (not math.isfinite(x) or x<0) for x in (since,before)) or (since is not None and before is not None and since>=before):
+            raise ValueError("Invalid time range")
         stamp="received_at" if kind=="observations" else "recorded_at"
         with self.db() as c:
-            rows=c.execute(f"SELECT seq,id,{stamp},payload FROM {kind} WHERE seq>? ORDER BY seq LIMIT ?",(after,limit+1)).fetchall()
-            items=[{"seq":r["seq"],"id":r["id"],stamp:r[stamp],"record":json.loads(r["payload"])} for r in rows[:limit]]
-            return {"items":items,"next_cursor":items[-1]["seq"] if len(rows)>limit else None}
+            c.execute("BEGIN")
+            if until is None:
+                # High-water mark from sqlite_sequence survives pruning.
+                row=c.execute("SELECT seq FROM sqlite_sequence WHERE name=?",(kind,)).fetchone()
+                until=max(after,row[0] if row else 0)
+            clauses=["seq>?","seq<=?"];args=[after,until]
+            for col,val,op in (("source_kind",source,"="),("json_extract(payload,'$.vantage_id')",vantage,"="),
+                ("json_extract(payload,'$.probe_kind')",probe,"="),("json_extract(payload,'$.outcome')",outcome,"="),
+                (stamp,since,">="),(stamp,before,"<")):
+                if val is not None:
+                    clauses.append(col+op+"?");args.append(val)
+            rows=c.execute(f"SELECT seq,id,{stamp},payload FROM {kind} WHERE "+" AND ".join(clauses)+" ORDER BY seq LIMIT ?",(*args,limit+1)).fetchall()
+            items=[self.item(r,stamp) for r in rows[:limit]]
+            return {"items":items,"next_cursor":items[-1]["seq"] if len(rows)>limit else None,"until":until,
+                "time_basis":stamp,"retention_can_remove_records":True}
+
+    def detail(self,kind,id):
+        if kind not in ("observations","events"):
+            raise ValueError("Invalid evidence kind")
+        stamp="received_at" if kind=="observations" else "recorded_at"
+        with self.db() as c:
+            c.execute("BEGIN")
+            row=c.execute(f"SELECT seq,id,{stamp},payload FROM {kind} WHERE id=?",(id,)).fetchone()
+            if row is None:
+                return None
+            result=self.item(row,stamp)
+            if kind=="events":
+                result["evidence"]=[self.item(r,"received_at") for r in c.execute("""SELECT o.seq,o.id,o.received_at,o.payload
+                    FROM event_evidence e JOIN observations o ON o.id=e.observation_id WHERE e.event_id=? ORDER BY o.seq""",(id,))]
+            return result
 
     def status(self):
         with self.db() as c:
-            return dict(c.execute("SELECT rows,bytes FROM usage WHERE singleton=1").fetchone())|{"max_rows":self.max_rows,"max_bytes":self.max_bytes}
+            c.execute("BEGIN")
+            result=dict(c.execute("SELECT rows,bytes FROM usage WHERE singleton=1").fetchone())|{"max_rows":self.max_rows,"max_bytes":self.max_bytes}
+            sources={r["source_kind"]:dict(r) for r in c.execute("SELECT * FROM source_usage")}
+            for key in set(sources)|set(self.quotas):
+                entry=sources.setdefault(key,{"source_kind":key,"rows":0,"bytes":0,"evicted":0,"last_evicted_at":None})
+                quota=self.quotas.get(key)
+                entry["max_rows"]=quota[0] if quota else None
+                entry["max_bytes"]=quota[1] if quota else None
+            result["sources"]=sources
+            result["cursors"]={r[0]:r[1] for r in c.execute("SELECT stream,position FROM cursors")}
+            return result
 
     def prune(self,*,before,limit=1000):
         # Explicit receipt-time retention; keep evidence referenced by surviving events.

@@ -8,7 +8,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from backend.ndc.storage import Store
-from backend.ndc.evidence import EvidenceStore
+from backend.ndc.evidence import EvidenceStore,RUNTIME_QUOTAS
+from backend.ndc.intelligence_api import router as intelligence_router
 from backend.ndc.evidence_drain import EvidenceDrain
 from backend.ndc.jobs import Coordinator
 from backend.ndc.api import router, inspection_slot
@@ -28,7 +29,7 @@ async def lifespan(app):
         app.state.security=Security(store.path.parent)
         allowed_networks()
         store.initialize()
-        evidence=EvidenceStore(store.path.with_name("intelligence.sqlite"))
+        evidence=EvidenceStore(store.path.with_name("intelligence.sqlite"),quotas=RUNTIME_QUOTAS)
         evidence.initialize()
         app.state.evidence=evidence
         coordinator=Coordinator(store)
@@ -93,6 +94,8 @@ def intelligence_status(request: Request):
         "stream_errors":dict(request.app.state.evidence_drain.errors),
         "retention_error":request.app.state.evidence_drain.retention_error,
         "retention_days":30}
+
+app.include_router(intelligence_router)
 
 @app.get("/api/defaults")
 def defaults():
