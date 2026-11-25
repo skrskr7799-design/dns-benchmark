@@ -135,3 +135,5 @@ History plot X is session order, gaps for missing or failed series, not a
 continuous time series. No new backend functionality. Responsive matrix
 now 13 screens x 5 sizes (65 initial screenshots). Populated visual QA,
 remaining screens and manual comparison pending. No main merge.
+
+Populated fixture captures added for Providers, Benchmark, History and Inspector at desktop 1536, mobile 390 and compact mobile 320 widths (12 additional planned screenshots). Tests exercise actual endpoint selection transfer, P95 trend, long IPv6 and raw response tab. Fixtures are explicitly separated by artifact directory. Manual visual review remains pending.
