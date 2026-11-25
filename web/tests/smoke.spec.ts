@@ -140,3 +140,19 @@ test('smart diagnostics separates observations from hypotheses',async({page})=>{
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+test('integrations show opt-in status and redacted aggregate statistics',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/integrations',route=>route.fulfill({json:{adguard_configured:true,throughput_configured:false}}))
+ await page.route('**/api/v1/integrations/adguard',async route=>{
+   expect(route.request().method()).toBe('POST')
+   await route.fulfill({json:{configured:true,errors:{},at:1,version:'v0.fixture',protection_enabled:true,running:true,queries:123,blocked:20,mean_ms:15,upstreams:['https://resolver.test'],upstreams_omitted:0,upstream_timings:[],time_units:'hours'}})
+ })
+ await page.getByRole('link',{name:'Integrations',exact:true}).click()
+ await expect(page.getByRole('button',{name:'Измерить загрузку'})).toBeDisabled()
+ await page.getByRole('button',{name:'Обновить статистику'}).click()
+ await expect(page.getByText('https://resolver.test',{exact:true})).toBeVisible()
+ await expect(page.getByText('123',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
