@@ -37,6 +37,13 @@ test('DNS Intelligence real route and deterministic UI states',async({page},info
  await page.getByLabel('Режим',{exact:true}).selectOption('warm')
  await expect(page.getByRole('heading',{name:'Нет групп по выбранным фильтрам'})).toBeVisible()
  await page.getByLabel('Режим',{exact:true}).selectOption('all')
+ await page.getByLabel('Семейство IP',{exact:true}).selectOption('ipv6')
+ await expect(page.getByRole('heading',{name:'Нет групп по выбранным фильтрам'})).toBeVisible()
+ await page.getByLabel('Семейство IP',{exact:true}).selectOption('all')
+ await page.getByLabel('Протокол',{exact:true}).selectOption('h2')
+ await expect(page.getByRole('heading',{name:'Рейтинг DNS'})).toBeVisible()
+ await page.getByLabel('Период',{exact:true}).selectOption('1')
+ await expect(page.getByRole('heading',{name:'Рейтинг DNS'})).toBeVisible()
  for(const [width,height] of [[1536,1024],[1024,768],[768,1024],[390,844],[320,800]]){
   await page.setViewportSize({width,height})
   await expect(page.getByRole('heading',{name:'Рейтинг DNS'})).toBeVisible()

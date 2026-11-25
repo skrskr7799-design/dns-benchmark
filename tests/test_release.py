@@ -8,6 +8,7 @@ from backend.ndc.storage import Store, Busy
 from backend.ndc.backup import backup,restore
 from backend.ndc.security import Security,matches_csrf
 from backend.ndc.evidence import EvidenceStore
+from backend.ndc.benchmark_evidence import BenchmarkDrain
 from unittest.mock import patch as env_patch
 
 CFG={"endpoints":["udp://127.0.0.1"],"count":1,"mode":"cold","family":"ipv4","parallel":1}
@@ -47,7 +48,12 @@ class ReleaseTests(unittest.TestCase):
             account_dir.mkdir()
             Security(account_dir).setup("admin","fixture-account-password")
             (account_dir/"owner-account.json").replace(self.data/"owner-account.json")
-        EvidenceStore(self.data/"intelligence.sqlite").initialize()
+        evidence=EvidenceStore(self.data/"intelligence.sqlite");evidence.initialize()
+        # Simulate power loss after derived commit and before source acknowledgement.
+        def crash(): raise RuntimeError("injected after derived commit")
+        with self.assertRaises(RuntimeError): BenchmarkDrain(self.store,evidence).once(crash)
+        self.assertEqual(self.store.evidence_pending_count(),1)
+        self.assertEqual(evidence.status()["rows"],1)
         dest=self.root/"backup"
         with open(self.data/"coordinator.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -60,7 +66,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual((restored/"owner-password").stat().st_mode&0o777,0o600)
         self.assertEqual((restored/"owner-account.json").stat().st_mode&0o777,0o600)
         Security(restored).login("fixture-account-password","admin")
-        self.assertEqual(EvidenceStore(restored/"intelligence.sqlite").status()["rows"],0)
+        restored_store=Store(restored/"history.sqlite");restored_store.initialize()
+        restored_evidence=EvidenceStore(restored/"intelligence.sqlite");restored_evidence.initialize()
+        self.assertEqual(restored_evidence.status()["rows"],1)
+        self.assertTrue(BenchmarkDrain(restored_store,restored_evidence).once())
+        self.assertEqual(restored_store.evidence_pending_count(),0)
+        self.assertEqual(restored_evidence.status()["rows"],1)
         with self.assertRaises(FileExistsError):
             restore(dest,restored)
         (dest/"owner-password").write_text("changed")

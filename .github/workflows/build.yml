@@ -115,6 +115,8 @@ jobs:
           docker restart benchmark
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
           curl -fsS http://127.0.0.1:8080/health
+      - name: Real controlled DNS ranking acceptance
+        run: docker exec -i benchmark python - < tests/test_dns_intelligence_live.py
       - name: Obsidian responsive matrix
         working-directory: web
         run: npm test -- visual.spec.ts intelligence.spec.ts
