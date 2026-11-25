@@ -2,10 +2,31 @@
 from typing import Literal
 from fastapi import APIRouter,Request,Query,HTTPException
 from .evidence import Source,Kind,Outcome
+from .dns_cohorts import aggregate,NarrowQuery
 
 router=APIRouter(prefix="/api/v1/intelligence")
 EvidenceKind=Literal["observations","events"]
 MAX_SEQ=9223372036854775807
+
+@router.get("/dns/cohorts")
+def dns_cohorts(request:Request,since:float=Query(...,ge=0,le=253402300799),
+    before:float=Query(...,ge=0,le=253402300799),source:Literal["benchmark","agent"]="benchmark",
+    vantage:str|None=Query(None,min_length=1,max_length=128,pattern=r"^[A-Za-z0-9_.:-]+$"),
+    profile:str|None=Query(None,pattern=r"^[a-f0-9]{64}$")):
+    state=request.app.state
+    try:
+        rows,usage=state.evidence.dns_cohort_rows(source=source,since=since,before=before,vantage=vantage,profile=profile)
+        result=aggregate(rows)
+    except NarrowQuery:
+        raise HTTPException(422,"Narrow the time range, vantage or profile") from None
+    except ValueError:
+        raise HTTPException(422,"Invalid cohort range") from None
+    producer=({"pending":state.store.evidence_pending_count()} if source=="benchmark" else state.agents.evidence_status())
+    result["coverage"]={"time_basis":"received_at","since":since,"before":before,"source":source,
+        "vantage":vantage,"profile":profile,"retained_usage_at_read":usage,
+        "producer_status_at_response":producer,"stream_error":state.evidence_drain.errors.get(source+"-v1"),
+        "complete_window_verified":False,"source_and_derived_status_not_atomic":True}
+    return result
 
 @router.get("/{kind}")
 def page(request:Request,kind:EvidenceKind,after:int=Query(0,ge=0,le=MAX_SEQ),

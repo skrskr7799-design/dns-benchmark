@@ -323,6 +323,24 @@ class EvidenceStore:
             return {"items":items,"next_cursor":items[-1]["seq"] if len(rows)>limit else None,"until":until,
                 "time_basis":stamp,"retention_can_remove_records":True}
 
+    def dns_cohort_rows(self,*,source,since,before,vantage=None,profile=None):
+        from .dns_cohorts import MAX_RECORDS,NarrowQuery
+        if source not in ("benchmark","agent") or not math.isfinite(since) or not math.isfinite(before) or not 0<=since<before or before-since>30*86400:
+            raise ValueError("Invalid cohort range")
+        clauses=["source_kind=?","received_at>=?","received_at<?","json_extract(payload,'$.probe_kind')='dns'"]
+        args=[source,since,before]
+        if vantage is not None:
+            clauses.append("json_extract(payload,'$.vantage_id')=?");args.append(vantage)
+        if profile is not None:
+            clauses.append("json_extract(payload,'$.profile_revision')=?");args.append(profile)
+        with self.db() as c:
+            c.execute("BEGIN")
+            rows=c.execute("SELECT seq,id,received_at,payload FROM observations WHERE "+" AND ".join(clauses)+" ORDER BY seq LIMIT ?",(*args,MAX_RECORDS+1)).fetchall()
+            if len(rows)>MAX_RECORDS:
+                raise NarrowQuery("Too many records; narrow the query")
+            usage=c.execute("SELECT rows,bytes,evicted,last_evicted_at FROM source_usage WHERE source_kind=?",(source,)).fetchone()
+            return [self.item(r,"received_at") for r in rows],dict(usage) if usage else {"rows":0,"bytes":0,"evicted":0,"last_evicted_at":None}
+
     def detail(self,kind,id):
         if kind not in ("observations","events"):
             raise ValueError("Invalid evidence kind")

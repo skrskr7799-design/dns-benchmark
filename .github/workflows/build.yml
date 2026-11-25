@@ -97,6 +97,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_agent_evidence.py
       - name: Intelligence source quotas, migration and read contracts
         run: docker exec -i benchmark python - < tests/test_intelligence_policy.py
+      - name: DNS comparable cohorts and coverage semantics
+        run: docker exec -i benchmark python - < tests/test_dns_cohorts.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

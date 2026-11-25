@@ -72,7 +72,15 @@ assert request("/api/v1/intelligence/status")["sources"]["benchmark"]["rows"]>=1
 expect_error(urllib.request.Request(base+"/api/v1/intelligence/observations?limit=201"),422)
 expect_error(urllib.request.Request(base+"/api/v1/intelligence/events?outcome=success"),422)
 expect_error(urllib.request.Request(base+"/api/v1/intelligence/events/"+"0"*64),404)
-print("Authenticated intelligence read API and real benchmark ingestion passed")
+now=time.time()
+cohort_path="/api/v1/intelligence/dns/cohorts?since="+str(now-3600)+"&before="+str(now+1)
+expect_error(urllib.request.Request(base+cohort_path.replace("since=","invalid=")),422)
+cohorts=request(cohort_path)
+assert cohorts["methodology"]=="dns-cohorts-v1" and cohorts["eligible_records"]>=1
+assert cohorts["coverage"]["complete_window_verified"] is False
+assert cohorts["ranking"] is None
+assert any(t["attempted"]>=2 for g in cohorts["cohorts"] for t in g["targets"])
+print("Authenticated intelligence read API, benchmark ingestion and cohort analysis passed")
 with opener.open("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
     assert b"event: snapshot" in response.read()
 profile=request("/api/v1/profiles",{"name":"smoke","config":{"endpoints":["udp://127.0.0.1"],"count":2}})
