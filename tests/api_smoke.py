@@ -160,6 +160,16 @@ blocked=request("/api/v1/network/routes",{"host":"169.254.169.254","max_hops":1}
 assert not blocked["results"][0]["reached"] and not blocked["results"][0]["hops"]
 print("Route analyzer API smoke passed")
 
+monitor=request("/api/v1/monitoring/monitors",{"name":"smoke","host":"127.0.0.1","kind":"tcp","enabled":False})
+assert monitor["enabled"] is False
+assert request("/api/v1/monitoring")["monitors"][0]["id"]==monitor["id"]
+assert request("/api/v1/monitoring/monitors/"+monitor["id"]+"/history")==[]
+req=urllib.request.Request(base+"/api/v1/monitoring/monitors/"+monitor["id"],method="DELETE",headers={"X-CSRF-Token":csrf})
+with opener.open(req,timeout=10) as response:
+    assert response.status==204
+assert request("/api/v1/monitoring")["monitors"]==[]
+print("Monitoring API smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
