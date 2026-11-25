@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from .models import Run
 
 VERSION="1"
@@ -30,3 +30,17 @@ class Result(BaseModel):
 class ActiveHeartbeat(Heartbeat):
     task_id: str=Field(pattern=r"^[a-f0-9]{32}$")
     lease: str=Field(min_length=40,max_length=128)
+
+class Batch(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    request_id: str=Field(pattern=r"^[a-f0-9]{32}$")
+    agent_ids: list[str]=Field(min_length=2,max_length=8)
+    config: AgentRun
+
+    @field_validator("agent_ids")
+    @classmethod
+    def unique_ids(cls,ids):
+        import re
+        if len(set(ids))!=len(ids) or any(not re.fullmatch(r"[a-f0-9]{32}",i) for i in ids):
+            raise ValueError("Invalid or duplicate agent IDs")
+        return ids
