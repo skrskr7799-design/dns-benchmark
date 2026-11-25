@@ -7,7 +7,9 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.ndc.storage import Store
 from backend.ndc.jobs import Coordinator
-from backend.ndc.api import router
+from backend.ndc.api import router, inspection_slot
+from backend.ndc.monitoring import MonitorStore, MonitorScheduler, Telegram
+from backend.ndc.monitor_api import router as monitor_router
 from backend.ndc.security import Security, guard, router as auth_router
 from backend.ndc.scope import allowed_networks
 
@@ -22,12 +24,19 @@ async def lifespan(app):
         coordinator=Coordinator(store)
         app.state.store=store
         app.state.coordinator=coordinator
+        monitors=MonitorStore(store.path.with_name('monitoring.sqlite'))
+        monitors.initialize()
+        scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent))
+        app.state.monitors=monitors
+        app.state.monitor_scheduler=scheduler
         coordinator.start()
+        scheduler.start()
         try:
             yield
         finally:
+            scheduler.stop()
             coordinator.stop()
-            if coordinator.thread.is_alive():
+            if coordinator.thread.is_alive() or scheduler.thread.is_alive():
                 # Do not release ownership while outstanding IO can still write.
                 os._exit(1)
 
@@ -35,6 +44,7 @@ app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 app.middleware('http')(guard)
 app.include_router(auth_router)
 app.include_router(router)
+app.include_router(monitor_router)
 web_dist=Path(__file__).with_name("web-dist")
 if (web_dist/"assets").is_dir():
     app.mount("/assets",StaticFiles(directory=web_dist/"assets"),name="assets")
