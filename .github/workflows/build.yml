@@ -1,0 +1,23 @@
+name: Build
+on:
+  push:
+    branches: [main, work/foundation]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t dns-benchmark:test .
+      - run: |
+          docker run -d --name benchmark -p 127.0.0.1:8080:8080 dns-benchmark:test
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/api/defaults
+          docker exec benchmark python -c 'import dns.query; print(dns.query.HTTPVersion.H3)'
+      - run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag dns-benchmark:test ghcr.io/skrskr7799-design/dns-benchmark:edge
+          docker push ghcr.io/skrskr7799-design/dns-benchmark:edge

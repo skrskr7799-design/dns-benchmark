@@ -1,0 +1,28 @@
+name: dns-benchmark
+services:
+  benchmark:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:edge
+    ports:
+      - "8099:8080"
+    volumes:
+      - data:/data
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    x-casaos:
+      ports:
+        - container: "8080"
+          description:
+            en_us: Web interface
+volumes:
+  data:
+x-casaos:
+  title:
+    en_us: DNS Benchmark
+  category: Network
+  port_map: "8099"
+  scheme: http
+  index: /
+  main: benchmark
