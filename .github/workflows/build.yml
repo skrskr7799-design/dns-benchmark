@@ -53,6 +53,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_routes.py
       - name: Monitoring lifecycle tests
         run: docker exec -i benchmark python - < tests/test_monitoring.py
+      - name: Agent contract and lifecycle
+        run: docker exec -i benchmark python - < tests/test_agents.py
       - name: Browser smoke
         working-directory: web
         run: |
@@ -64,11 +66,13 @@ jobs:
         if: failure()
         run: docker logs benchmark || true
       - name: Publish image
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark' || github.ref == 'refs/heads/work/dns-03-inspector' || github.ref == 'refs/heads/work/net-01-connectivity' || github.ref == 'refs/heads/work/net-02-routes' || github.ref == 'refs/heads/work/mon-01-monitoring')
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark' || github.ref == 'refs/heads/work/dns-03-inspector' || github.ref == 'refs/heads/work/net-01-connectivity' || github.ref == 'refs/heads/work/net-02-routes' || github.ref == 'refs/heads/work/mon-01-monitoring' || github.ref == 'refs/heads/work/dist-01-agents')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TAG=edge
+          elif [ "${{ github.ref }}" = "refs/heads/work/dist-01-agents" ]; then
+            TAG=preview-dist-01
           elif [ "${{ github.ref }}" = "refs/heads/work/mon-01-monitoring" ]; then
             TAG=preview-mon-01
           elif [ "${{ github.ref }}" = "refs/heads/work/net-02-routes" ]; then
