@@ -17,8 +17,12 @@ class Run(BaseModel):
             if len(endpoint) > 2048 or any(c.isspace() for c in endpoint):
                 raise ValueError("Invalid endpoint")
             u = urlsplit(endpoint)
-            if u.scheme not in ("https", "h3", "tls", "quic", "udp") or not u.hostname or u.username or u.password or u.fragment:
+            if u.scheme not in ("https", "h3", "tls", "quic", "udp") or not u.hostname or u.username or u.password or u.fragment or u.query:
                 raise ValueError("Invalid endpoint")
+            if u.scheme not in ('https','h3') and u.path not in ('','/'):
+                raise ValueError('Unexpected path')
+            if '%' in u.hostname:
+                raise ValueError('Invalid hostname')
             if u.scheme == "udp":
                 ipaddress.ip_address(u.hostname)
             if u.port is not None and not 1 <= u.port <= 65535:
