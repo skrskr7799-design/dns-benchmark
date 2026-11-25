@@ -4,7 +4,7 @@ export interface Result {
   endpoint: string; ip?: string | null; mode?: Mode; family?: Family;
   ok: number; count: number; mean: number | null; p50: number | null;
   p95: number | null; p99: number | null; jitter: number | null;
-  error?: string; errors?: Record<string, number>
+  error?: string; errors?: Record<string, number>; engine?: string; protocols?: string[]; peer_ips?: string[]; reuse?: {yes:number;no:number;unknown:number}; warmup_error?: string | null; requested_count?:number
 }
 export interface Run { endpoints: string[]; count: number; mode: Mode; family: Family; parallel: number }
 export interface Profile { id: string; name: string; config: Run }
