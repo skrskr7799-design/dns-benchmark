@@ -24,7 +24,7 @@ from aioquic.h3.events import HeadersReceived, DataReceived
 from h2.connection import H2Connection
 from h2.config import H2Configuration
 from h2.events import DataReceived as H2Data, StreamEnded
-from backend.ndc.probes.dns import query, measure
+from backend.ndc.probes.dns import query, measure, measure_both
 
 def answer(wire):
     q=dns.message.from_wire(wire)
@@ -201,6 +201,25 @@ class TransportTest(unittest.TestCase):
                 with ExitStack() as stack,self.assertRaises(Exception):
                     query(endpoint,"example.com","127.0.0.1",stack,{})
                 self.assertEqual(f.requests,0)
+
+    def test_both_100_same_peer_and_corpus(self):
+        with Fixture("tcp",self.crt,self.key) as f:
+            endpoint=f"tcp://127.0.0.1:{f.port}"
+            with patch("backend.ndc.probes.dns.resolve",return_value="127.0.0.1") as resolve:
+                cold,warm=list(measure_both(endpoint,100,"ipv4",threading.Event()))
+            self.assertEqual(resolve.call_count,1)
+            self.assertEqual(cold["ip"],warm["ip"])
+            self.assertEqual(cold["bootstrap_ms"],warm["bootstrap_ms"])
+            self.assertEqual(cold["ok"],100)
+            self.assertEqual(warm["ok"],100)
+            self.assertEqual([s["domain"] for s in cold["samples"]],[s["domain"] for s in warm["samples"]])
+            self.assertEqual(cold["reuse"]["no"],100)
+            self.assertEqual(warm["reuse"]["yes"],100)
+            self.assertTrue(warm["warmup"]["ok"])
+            self.assertEqual(f.requests,201)
+            self.assertEqual(f.connections,101)
+            self.assertTrue(all(s["connect_ms"] is not None for s in cold["samples"]))
+            self.assertTrue(all(s["connect_ms"] is None for s in warm["samples"]))
 
     def test_warmup_error_is_explicit(self):
         with patch("backend.ndc.probes.dns.resolve",return_value="127.0.0.1"),patch("backend.ndc.probes.dns.query",side_effect=TimeoutError("fixture")):
