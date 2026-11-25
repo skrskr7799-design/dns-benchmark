@@ -46,3 +46,25 @@ test('inspector navigation, form and deterministic rendering',async({page})=>{
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+test('network tools navigation and safe result rendering',async({page})=>{
+ await login(page)
+ const row={host:'example.com',port:443,family:'ipv4',ip:'192.0.2.1',peer_ip:'192.0.2.1',source_ip:'172.17.0.2',dns_ms:1,connect_ms:2,handshake_ms:3,ttfb_ms:4,headers_ms:5,total_ms:10,http_status:204,tls_version:'TLSv1.3',alpn:'http/1.1',cipher:'TLS_AES_256_GCM_SHA384',certificate:null,chain:null,verified:true,stage:'complete',error:null,ok:true}
+ await page.route('**/api/v1/network/connectivity',async route=>{
+   expect(route.request().postDataJSON()).toMatchObject({kind:'https',family:'both',port:443})
+   await route.fulfill({json:{host:'example.com',kind:'https',vantage:'container',results:[{family:'ipv4',ip:row.ip,samples:[row],attempted:1,success:1,mean_ms:2,variation_ms:0}]}})
+ })
+ await page.route('**/api/v1/network/tls',async route=>{
+   await route.fulfill({json:{host:'example.com',vantage:'container',results:[{...row,http_status:null,certificate:{subject:'CN=example.com',issuer:'CN=Fixture CA',serial:'01',not_before:'2026-01-01',not_after:'2027-01-01',days_remaining:37,sha256:'ab'.repeat(32),san:['example.com']}}]}})
+ })
+ await page.getByRole('link',{name:'Connectivity',exact:true}).click()
+ await page.getByLabel('Проверка',{exact:true}).selectOption('https')
+ await page.getByLabel('Сеть',{exact:true}).selectOption('both')
+ await page.getByRole('button',{name:'Проверить соединение'}).click()
+ await expect(page.getByText('HTTP status:',{exact:false})).toBeVisible()
+ await page.getByRole('link',{name:'TLS Inspector',exact:true}).click()
+ await page.getByRole('button',{name:'Проверить TLS'}).click()
+ await expect(page.getByText('CN=Fixture CA',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
