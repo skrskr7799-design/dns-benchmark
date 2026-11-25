@@ -136,7 +136,7 @@ test('smart diagnostics separates observations from hypotheses',async({page})=>{
  await expect(page.getByText('TCP-соединение не установлено',{exact:true})).toBeVisible()
  await expect(page.getByText('Наблюдение',{exact:true})).toBeVisible()
  await page.getByText('Подтверждающие данные',{exact:true}).click()
- await expect(page.getByText(/"error": "TimeoutError"/)).toBeVisible()
+ await expect(page.locator(".diag-finding pre").filter({hasText: /"error": "TimeoutError"/})).toBeVisible()
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
