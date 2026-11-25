@@ -1,7 +1,8 @@
 import ipaddress
 from typing import Literal
 from urllib.parse import urlsplit
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+import dns.name, dns.reversename, dns.exception
 
 class Run(BaseModel):
     endpoints: list[str] = Field(min_length=1, max_length=40)
@@ -32,3 +33,37 @@ class Run(BaseModel):
 class Profile(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     config: Run
+
+class Inspect(BaseModel):
+    name: str = Field(min_length=1,max_length=253)
+    qtype: Literal["A","AAAA","CNAME","MX","TXT","NS","SOA","CAA","PTR","SRV","HTTPS","SVCB","DS","DNSKEY","RRSIG"]="A"
+    endpoints: list[str] = Field(min_length=1,max_length=4)
+    family: Literal["auto","ipv4","ipv6"]="ipv4"
+    dnssec: bool=False
+    checking_disabled: bool=False
+    tcp_fallback: bool=False
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoints(cls,endpoints):
+        return Run(endpoints=endpoints).endpoints
+
+    @model_validator(mode="after")
+    def canonical_name(self):
+        if any(c.isspace() or ord(c)<32 or c in "/\\@" for c in self.name):
+            raise ValueError("Invalid DNS name")
+        if self.qtype=="PTR":
+            try:
+                ip=ipaddress.ip_address(self.name)
+            except ValueError:
+                pass
+            else:
+                if getattr(ip,"scope_id",None):
+                    raise ValueError("Scoped IP is not supported")
+                self.name=dns.reversename.from_address(str(ip)).to_text()
+                return self
+        try:
+            self.name=dns.name.from_text(self.name).canonicalize().to_text()
+        except (dns.exception.DNSException,UnicodeError,ValueError) as exc:
+            raise ValueError("Invalid DNS name") from exc
+        return self
