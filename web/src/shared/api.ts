@@ -7,7 +7,7 @@ export interface Result {
   error?: string; errors?: Record<string, number>
 }
 export interface Run { endpoints: string[]; count: number; mode: Mode; family: Family; parallel: number }
-export interface Status { running: boolean; results: Result[]; done: number; total: number; error?: string }
+export interface Status { running: boolean; run_id?: string; state?: string; results: Result[]; done: number; total: number; error?: string }
 export interface History { time: number; results: Result[] }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
@@ -21,6 +21,7 @@ export const api = {
   defaults: () => request<string[]>('/api/defaults'),
   status: () => request<Status>('/api/status'),
   history: () => request<History[]>('/api/history'),
+  cancel: (id: string) => request<unknown>('/api/v1/runs/'+encodeURIComponent(id)+'/cancel',{method:'POST'}),
   start: (run: Run) => request<{started: boolean}>('/api/run', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(run)})
 }
 export function exportJson(results: Result[]) {
