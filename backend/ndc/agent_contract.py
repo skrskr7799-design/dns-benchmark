@@ -26,3 +26,7 @@ class Result(BaseModel):
     status: Literal["completed","failed"]
     results: list[dict]=Field(default_factory=list,max_length=2)
     error: str|None=Field(default=None,max_length=250)
+
+class ActiveHeartbeat(Heartbeat):
+    task_id: str=Field(pattern=r"^[a-f0-9]{32}$")
+    lease: str=Field(min_length=40,max_length=128)
