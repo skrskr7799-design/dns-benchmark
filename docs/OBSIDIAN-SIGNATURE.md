@@ -153,3 +153,5 @@ persistence test. Initial-state matrix 14 screens × 5 plus 12 populated
 fixture screenshots = 82 planned. No backend changes. Full populated visual
 review, live acceptance and current CI pending. Owner authorized merge only
 once finished; no stable tag or merge while gates remain open.
+
+Extended populated visual fixtures cover Overview, Connectivity, TLS, Monitoring, Agents, Integrations and Diagnostics at the three primary widths, plus existing four screens. Total planned screenshots: 70 initial + 33 populated = 103. CI pending, not yet a visual acceptance. Route fixture browser checks remain in functional smoke; real-world testing and manual final review remain open.
