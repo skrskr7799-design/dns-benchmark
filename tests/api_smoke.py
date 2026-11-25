@@ -150,6 +150,16 @@ assert not blocked["results"][0]["ok"] and blocked["results"][0]["stage"]=="reso
 assert request("/api/v1/capabilities")["connectivity"]
 print("Connectivity and TLS API smoke passed")
 
+routes=request("/api/v1/network/routes",{"host":"127.0.0.1","max_hops":2})
+assert routes["method"]=="udp-error-queue"
+route=routes["results"][0]
+if route["available"]:
+    assert route["reached"],route
+    assert route["hops"][0]["samples"][0]["status"]=="destination"
+blocked=request("/api/v1/network/routes",{"host":"169.254.169.254","max_hops":1})
+assert not blocked["results"][0]["reached"] and not blocked["results"][0]["hops"]
+print("Route analyzer API smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
