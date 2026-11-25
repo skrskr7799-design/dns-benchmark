@@ -111,6 +111,29 @@ jobs:
           name: obsidian-responsive-screenshots
           path: web/test-results/**/*.png
           if-no-files-found: warn
+      - name: First-run setup unit tests
+        run: docker exec -i benchmark python - < tests/test_setup.py
+      - name: Start fresh setup instance
+        run: |
+          docker volume create ndc-setup-data
+          docker run -d --name benchmark-setup --read-only --tmpfs /tmp:size=64m --memory 768m --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges -v ndc-setup-data:/data -p 127.0.0.1:8081:8080 dns-benchmark:test
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8081/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8081/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/api/defaults)" = 401
+      - name: Browser first-run setup
+        working-directory: web
+        env:
+          TEST_BASE_URL: http://127.0.0.1:8081
+        run: npm test -- setup.spec.ts
+      - name: Verify persisted owner after restart
+        run: |
+          docker restart benchmark-setup
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8081/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8081/api/auth/session | jq -e '.setup_required == false and .username_required == true'
+          curl -fsS -H 'X-NDC-Request: 1' -H 'Content-Type: application/json' -d '{"username":"admin","password":"fixture-setup-password-2026"}' http://127.0.0.1:8081/api/auth/login | jq -e '.authenticated == true'
+      - name: Setup logs
+        if: failure()
+        run: docker logs benchmark-setup || true
       - name: Resource snapshot
         if: always()
         run: docker stats --no-stream benchmark || true

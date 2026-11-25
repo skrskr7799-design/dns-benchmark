@@ -3,7 +3,9 @@ import fcntl
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.staticfiles import StaticFiles
 from backend.ndc.storage import Store
 from backend.ndc.jobs import Coordinator
@@ -46,6 +48,12 @@ async def lifespan(app):
                 os._exit(1)
 
 app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+@app.exception_handler(RequestValidationError)
+async def validation_error(request,exc):
+    if request.scope.get("path","").startswith("/api/auth/"):
+        return JSONResponse({"detail":"Invalid authentication fields"},422)
+    return await request_validation_exception_handler(request,exc)
+
 app.middleware('http')(guard)
 app.include_router(auth_router)
 app.include_router(router)

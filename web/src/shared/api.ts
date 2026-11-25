@@ -51,7 +51,7 @@ export interface IntegrationStatus {adguard_configured:boolean;throughput_config
 export interface AdGuardSnapshot {configured:boolean;errors:Record<string,string>;at:number;version:string|null;protection_enabled:boolean|null;running:boolean|null;queries:number|null;blocked:number|null;mean_ms:number|null;upstreams:string[];upstreams_omitted:number|null;upstream_timings:{upstream:string;mean_ms:number}[];time_units:string|null}
 export interface ThroughputReport {bytes:number;duration_ms:number;mbps:number|null;reason:string;body_started:boolean;byte_limit:number;vantage:string;method:string}
 export interface RunIndex {id:string;status:string;created:number;finished:number|null;error:string|null;revision:number}
-export interface Session { authenticated: boolean; csrf: string | null }
+export interface Session { authenticated: boolean; csrf: string | null; setup_required?:boolean; username_required?:boolean; setup_available?:boolean }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -94,7 +94,8 @@ export const api = {
   tls:(config:NetTarget)=>request<TLSReport>('/api/v1/network/tls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   inspect:(config:InspectConfig)=>request<Inspection>('/api/v1/dns/inspect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   session: () => request<Session>('/api/auth/session'),
-  login: (password: string) => request<Session>('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password})}),
+  setup: (username:string,password:string)=>request<Session>('/api/auth/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})}),
+  login: (password: string,username?:string) => request<Session>('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password,username})}),
   logout: () => request<Session>('/api/auth/logout',{method:'POST'}),
   defaults: () => request<string[]>('/api/defaults'),
   status: () => request<Status>('/api/status'),

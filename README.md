@@ -14,13 +14,11 @@ Smart Diagnostics, AdGuard Home read-only integration and bounded HTTP download.
 ## Isolated CasaOS preview
 
 Use deploy/compose.preview-rel01.yaml on port 8113, **not** the old live
-installation on 8099. Create the separate directory and owner secret:
+installation on 8099. Create the separate writable directory:
 ```sh
 sudo install -d -m 700 -o 10001 -g 10001 /DATA/AppData/dns-benchmark-preview-rel01
-sudo sh -c 'umask 077; openssl rand -hex 24 > /DATA/AppData/dns-benchmark-preview-rel01/owner-password'
-sudo chown 10001:10001 /DATA/AppData/dns-benchmark-preview-rel01/owner-password
 ```
-Read the password locally with sudo; do not paste it into chat or logs.
+Open the direct local IP and port to create the first owner in the browser. Existing owner-password files or NDC_OWNER_PASSWORD remain supported. The new account stores a salted scrypt verifier in /data/owner-account.json (0600). First-run setup is limited to direct private-network requests; do not expose an unconfigured instance to the Internet, even through Docker NAT. By default direct local HTTP uses a non-Secure cookie, other requests use Secure cookies; explicit NDC_SECURE_COOKIE=0 or 1 overrides this. Use verified HTTPS for normal operation. A writable /data mount is required.
 Import the preview compose only after its CI publishes the image. HTTP
 preview requires explicit NDC_SECURE_COOKIE=0 and a trusted LAN, firewall
 or private overlay. For normal operation use a verified HTTPS reverse proxy,
