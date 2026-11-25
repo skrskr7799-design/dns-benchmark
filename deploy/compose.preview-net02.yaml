@@ -1,0 +1,23 @@
+name: dns-benchmark-preview-net02
+services:
+  benchmark:
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-net-02
+    ports:
+      - "8107:8080"
+    volumes:
+      - /DATA/AppData/dns-benchmark-preview-net02:/data
+    environment:
+      NDC_SECURE_COOKIE: "0"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+x-casaos:
+  title:
+    en_us: Network Diagnostics NET-02
+  category: Network
+  port_map: "8107"
+  scheme: http
+  index: /
+  main: benchmark
