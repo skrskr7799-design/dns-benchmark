@@ -13,12 +13,12 @@ def records(section):
              "class":dns.rdataclass.to_text(rr.rdclass),"ttl":rr.ttl,
              "values":[r.to_text() for r in rr]} for rr in section]
 
-def signature(response):
+def signature(response,qtype):
     # Ignore TTL and answer ordering, canonicalize names embedded in RDATA.
     return (response.rcode(),tuple(sorted(
         (rr.name.canonicalize().to_text(),rr.rdclass,rr.rdtype,
          tuple(sorted(r.to_digestable() for r in rr)))
-        for rr in response.answer if rr.rdtype!=dns.rdatatype.RRSIG)))
+        for rr in response.answer if rr.rdtype!=dns.rdatatype.RRSIG or qtype=='RRSIG')))
 
 def inspect_one(endpoint,config):
     ip,bootstrap_ms,error=bootstrap(endpoint,config.family)
@@ -71,7 +71,7 @@ def inspect_one(endpoint,config):
             out["outcome"]="referral"
         else:
             out["outcome"]="no_data"
-        return out,signature(r) if out["outcome"]!="truncated" else None
+        return out,signature(r,config.qtype) if out["outcome"]!="truncated" else None
     except Exception as exc:
         out["duration_ms"]=round((time.monotonic()-start)*1000,3)
         out["error"]=describe(exc)
