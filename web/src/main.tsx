@@ -1,4 +1,4 @@
-import {useState} from 'react'
+import {useEffect,useRef,useState} from 'react'
 import {createRoot} from 'react-dom/client'
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import {createRootRoute,createRoute,createRouter,createHashHistory,RouterProvider,Outlet,Link} from '@tanstack/react-router'
@@ -27,7 +27,30 @@ const navGroups=[
 ] as const
 function Shell(){
  const [open,setOpen]=useState(false)
- return <div className="shell"><aside className={open?'sidebar nav-open':'sidebar'}><div className="sidebar-top"><Brand/><button className="secondary mobile-menu" aria-label={open?'Закрыть меню':'Открыть меню'} aria-expanded={open} aria-controls="workspace-nav" onClick={()=>setOpen(v=>!v)}><Icon name={open?'close':'menu'}/></button></div><nav id="workspace-nav" aria-label="Навигация">{navGroups.map(g=><div className="nav-group" key={g.title}><div className="nav-title">{g.title}</div>{g.items.map(([to,label,icon])=><Link key={to} to={to} activeOptions={{exact:true}} onClick={()=>setOpen(false)}><Icon name={icon}/><span>{label}</span></Link>)}</div>)}</nav><div className="instance"><div className="instance-label"><Icon name="agents"/><div><b>Local instance</b><small>Obsidian Signature</small></div></div><Logout/></div></aside><main><Circuit/><div className="workspace-content"><Outlet/></div></main></div>
+ const trigger=useRef<HTMLButtonElement>(null),drawer=useRef<HTMLDivElement>(null),close=useRef<HTMLButtonElement>(null)
+ useEffect(()=>{
+  if(!open)return
+  const media=window.matchMedia('(max-width:800px)')
+  if(!media.matches){setOpen(false);return}
+  const y=window.scrollY,body=document.body
+  const previous={position:body.style.position,top:body.style.top,width:body.style.width,overflow:body.style.overflow}
+  Object.assign(body.style,{position:'fixed',top:-y+'px',width:'100%',overflow:'hidden'})
+  close.current?.focus()
+  const resize=()=>{if(!media.matches)setOpen(false)}
+  const key=(e:KeyboardEvent)=>{
+   if(e.key==='Escape'){e.preventDefault();setOpen(false)}
+   if(e.key==='Tab'){
+    const items=Array.from(drawer.current?.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled])')??[]).filter(el=>el.getClientRects().length>0)
+    if(!items.length)return
+    const first=items[0],last=items[items.length-1]
+    if(e.shiftKey&&(document.activeElement===first||!drawer.current?.contains(document.activeElement))){e.preventDefault();last.focus()}
+    else if(!e.shiftKey&&(document.activeElement===last||!drawer.current?.contains(document.activeElement))){e.preventDefault();first.focus()}
+   }
+  }
+  media.addEventListener('change',resize);document.addEventListener('keydown',key)
+  return ()=>{media.removeEventListener('change',resize);document.removeEventListener('keydown',key);Object.assign(body.style,previous);window.scrollTo(0,y);if(media.matches)trigger.current?.focus({preventScroll:true})}
+ },[open])
+ return <div className="shell"><aside className={open?'sidebar nav-open':'sidebar'}><div className="sidebar-top" inert={open}><Brand/><button ref={trigger} className="secondary mobile-menu" aria-label="Открыть меню" aria-expanded={open} aria-controls="workspace-nav" onClick={()=>setOpen(true)}><Icon name="menu"/></button></div>{open&&<div className="nav-backdrop" aria-hidden="true" onClick={()=>setOpen(false)}/>}<div ref={drawer} className="nav-content" role={open?'dialog':undefined} aria-modal={open?true:undefined} aria-label={open?'Меню приложения':undefined}><div className="drawer-top"><Brand/><button ref={close} className="secondary mobile-menu" aria-label="Закрыть меню" onClick={()=>setOpen(false)}><Icon name="close"/></button></div><nav id="workspace-nav" aria-label="Навигация">{navGroups.map(g=><div className="nav-group" key={g.title}><div className="nav-title">{g.title}</div>{g.items.map(([to,label,icon])=><Link key={to} to={to} activeOptions={{exact:true}} onClick={()=>setOpen(false)}><Icon name={icon}/><span>{label}</span></Link>)}</div>)}</nav><div className="instance"><div className="instance-label"><Icon name="agents"/><div><b>Local instance</b><small>Obsidian Signature</small></div></div><Logout/></div></div></aside><main inert={open}><Circuit/><div className="workspace-content"><Outlet/></div></main></div>
 }
 const rootRoute=createRootRoute({component:Shell})
 const indexRoute=createRoute({getParentRoute:()=>rootRoute,path:'/',component:Overview})

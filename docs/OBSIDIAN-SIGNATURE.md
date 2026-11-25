@@ -157,3 +157,6 @@ once finished; no stable tag or merge while gates remain open.
 Extended populated visual fixtures cover Overview, Connectivity, TLS, Monitoring, Agents, Integrations and Diagnostics at the three primary widths, plus existing four screens. Total planned screenshots: 70 initial + 33 populated = 103. CI pending, not yet a visual acceptance. Route fixture browser checks remain in functional smoke; real-world testing and manual final review remain open.
 
 Final fixture extension includes real sample-chart UI fed deterministic mock data and selectable route with a missing hop. Planned screenshots now 70 initial + 36 populated = 106. These tests are not live network measurements. Main merge is conditional on new CI and visual review, and can be an integration candidate for owner testing, not a production-stable release.
+
+## Owner acceptance follow-up — mobile drawer
+Owner confirmed live CasaOS interface generally works, with mobile sidebar pushing main down. This patch keeps the header in flow, moves the menu to a fixed overlay with backdrop, locks background scroll, manages keyboard focus and closes on route selection, backdrop or Escape. Desktop layout unchanged in intent. Visual CI checks the main position, width, focus and closing interactions at 768, 390 and 320px; actual mobile Safari retest pending. No backend changes.
