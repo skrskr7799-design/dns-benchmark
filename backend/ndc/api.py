@@ -16,6 +16,7 @@ from .diagnostics import diagnose
 
 router=APIRouter()
 inspection_slot=threading.BoundedSemaphore(1)
+event_slots=asyncio.Semaphore(8)
 
 def services(request):
     return request.app.state.store, request.app.state.coordinator
@@ -55,7 +56,7 @@ def legacy_history(request: Request):
 def capabilities():
     return {"api_version":1,"engine":"python-dns02","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"monitoring":True,"agents":True,"diagnostics":True,"authenticated":True}
+            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"monitoring":True,"agents":True,"diagnostics":True,"integrations":True,"delete_runs":True,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
@@ -98,7 +99,25 @@ async def events(request: Request, job_id: str):
                 return
             await asyncio.sleep(1)
             idle+=1
-    return StreamingResponse(stream(),media_type="text/event-stream",headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+    if event_slots.locked():
+        raise HTTPException(429,"Too many event streams")
+    await event_slots.acquire()
+    async def limited():
+        try:
+            async for chunk in stream():
+                yield chunk
+        finally:
+            event_slots.release()
+    return StreamingResponse(limited(),media_type="text/event-stream",headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+
+@router.delete("/api/v1/runs/{job_id}",status_code=204)
+def delete_run(request: Request, job_id: str):
+    try:
+        if not services(request)[0].delete_run(job_id):
+            raise HTTPException(404,"Run not found")
+    except Busy as exc:
+        raise HTTPException(409,str(exc))
+    return Response(status_code=204)
 
 @router.get("/api/v1/runs/{job_id}/export")
 def export_run(request: Request, job_id: str, format: str="json"):
@@ -137,7 +156,10 @@ def list_profiles(request: Request):
 
 @router.post("/api/v1/profiles",status_code=201)
 def create_profile(request: Request, body: Profile):
-    return services(request)[0].put_profile(body.model_dump())
+    try:
+        return services(request)[0].put_profile(body.model_dump())
+    except Busy as exc:
+        raise HTTPException(409,str(exc))
 
 @router.put("/api/v1/profiles/{profile_id}")
 def update_profile(request: Request, profile_id: str, body: Profile):
