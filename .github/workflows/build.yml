@@ -93,7 +93,17 @@ jobs:
         working-directory: web
         run: |
           npx playwright install --with-deps chromium
-          npm test
+          npm test -- smoke.spec.ts
+      - name: Deterministic API and legacy history smoke
+        run: docker exec -i benchmark python - < tests/api_smoke.py
+      - name: Reset isolated CI fixture before visual checks
+        run: |
+          docker restart benchmark
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8080/health
+      - name: Obsidian responsive matrix
+        working-directory: web
+        run: npm test -- visual.spec.ts
       - name: Obsidian browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,8 +111,6 @@ jobs:
           name: obsidian-responsive-screenshots
           path: web/test-results/**/*.png
           if-no-files-found: warn
-      - name: Deterministic API and legacy history smoke
-        run: docker exec -i benchmark python - < tests/api_smoke.py
       - name: Resource snapshot
         if: always()
         run: docker stats --no-stream benchmark || true
