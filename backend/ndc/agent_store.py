@@ -1,4 +1,7 @@
 import hashlib
+import math
+import statistics
+import ipaddress
 import json
 import secrets
 import sqlite3
@@ -45,6 +48,8 @@ class AgentStore:
                 config TEXT NOT NULL,state TEXT NOT NULL,created REAL NOT NULL,
                 lease TEXT,lease_until REAL,finished REAL,payload TEXT,payload_hash TEXT);
             CREATE INDEX IF NOT EXISTS tasks_agent_state ON tasks(agent_id,state,created);
+            CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, created REAL NOT NULL, config TEXT NOT NULL, fingerprint TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS batch_members(batch_id TEXT NOT NULL REFERENCES batches(id) ON DELETE CASCADE, task_id TEXT NOT NULL UNIQUE REFERENCES tasks(id) ON DELETE CASCADE, agent_id TEXT NOT NULL REFERENCES agents(id), PRIMARY KEY(batch_id,agent_id));
             CREATE TABLE IF NOT EXISTS agent_audit(
                 id INTEGER PRIMARY KEY,at REAL NOT NULL,agent_id TEXT NOT NULL,event TEXT NOT NULL);
             """)
@@ -85,12 +90,13 @@ class AgentStore:
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='leased' AND lease_until<=?",(now,now))
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='queued' AND created<=?",(now,now-86400))
         c.execute("DELETE FROM tasks WHERE finished IS NOT NULL AND finished<?",(now-30*86400,))
+        c.execute("DELETE FROM batches WHERE NOT EXISTS (SELECT 1 FROM batch_members WHERE batch_id=batches.id)")
         c.execute("DELETE FROM agent_audit WHERE at<?",(now-180*86400,))
 
     def list(self):
         with self.db() as c:
             return [dict(r)|{"online":not r["revoked"] and r["last_seen"] is not None and self.clock()-r["last_seen"]<45}
-                    for r in c.execute("SELECT id,name,location,revoked,last_seen,engine,enroll_until FROM agents ORDER BY name,id")]
+                    for r in c.execute("SELECT id,name,location,revoked,last_seen,engine,enroll_until,credential IS NOT NULL AS enrolled FROM agents ORDER BY name,id")]
 
     def revoke(self,id):
         with self.db() as c:
@@ -124,6 +130,70 @@ class AgentStore:
             c.execute("INSERT INTO tasks(id,agent_id,config,state,created) VALUES(?,?,?,'queued',?)",(task,id,config.model_dump_json(),self.clock()))
             self.audit(c,id,"task queued "+task)
         return {"id":task}
+
+    def batch(self,body):
+        config=body.config.model_dump_json()
+        ids=sorted(body.agent_ids)
+        fingerprint=digest(json.dumps([ids,config]))
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            existing=c.execute("SELECT fingerprint FROM batches WHERE id=?",(body.request_id,)).fetchone()
+            if existing:
+                if existing[0]!=fingerprint:
+                    raise AgentError(409,"Batch request ID already used")
+                return {"id":body.request_id,"duplicate":True}
+            if c.execute("SELECT count(*) FROM tasks").fetchone()[0]+len(ids)>10000:
+                raise AgentError(409,"Task history capacity reached")
+            for id in ids:
+                if not c.execute("SELECT 1 FROM agents WHERE id=? AND revoked=0 AND credential IS NOT NULL",(id,)).fetchone():
+                    raise AgentError(404,"Selected agent is not enrolled")
+                if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+                    raise AgentError(409,"Selected agent queue full")
+            now=self.clock()
+            c.execute("INSERT INTO batches VALUES(?,?,?,?)",(body.request_id,now,config,fingerprint))
+            for id in ids:
+                task=uuid.uuid4().hex
+                c.execute("INSERT INTO tasks(id,agent_id,config,state,created) VALUES(?,?,?,'queued',?)",(task,id,config,now))
+                c.execute("INSERT INTO batch_members VALUES(?,?,?)",(body.request_id,task,id))
+                self.audit(c,id,"batch task "+task)
+        return {"id":body.request_id,"duplicate":False}
+
+    def batches(self):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            return [dict(r)|{"config":json.loads(r["config"])} for r in c.execute("""SELECT b.id,b.created,b.config,count(t.id) AS total,
+                sum(CASE WHEN t.state IN ('queued','leased') THEN 0 ELSE 1 END) AS finished
+                FROM batches b JOIN batch_members m ON m.batch_id=b.id JOIN tasks t ON t.id=m.task_id
+                GROUP BY b.id ORDER BY b.created DESC LIMIT 50""")]
+
+    def batch_detail(self,id):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            b=c.execute("SELECT id,created,config FROM batches WHERE id=?",(id,)).fetchone()
+            if not b:
+                raise AgentError(404,"Batch not found")
+            rows=[]
+            for r in c.execute("""SELECT t.id,t.agent_id,t.state,t.created,t.finished,t.payload,a.name,a.location,a.last_seen,a.revoked
+                FROM batch_members m JOIN tasks t ON t.id=m.task_id JOIN agents a ON a.id=t.agent_id WHERE m.batch_id=? ORDER BY a.name,a.id""",(id,)):
+                row=dict(r)
+                payload=json.loads(row.pop("payload")) if row["payload"] else None
+                row.pop("payload",None)
+                row["online"]=not row["revoked"] and row["last_seen"] is not None and self.clock()-row["last_seen"]<45
+                row["error"]=payload.get("error") if payload else None
+                row["results"]=[comparison_row(x) for x in payload.get("results",[])] if payload else []
+                rows.append(row)
+            return dict(b)|{"config":json.loads(b["config"]),"members":rows}
+
+    def cancel_batch(self,id):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            if not c.execute("SELECT 1 FROM batches WHERE id=?",(id,)).fetchone():
+                raise AgentError(404,"Batch not found")
+            n=c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE id IN (SELECT task_id FROM batch_members WHERE batch_id=?) AND state IN ('queued','leased')",(self.clock(),id)).rowcount
+            return {"cancelled":n}
 
     def poll(self,credential,heartbeat):
         with self.db() as c:
@@ -215,3 +285,23 @@ def validate_result(cfg,body):
             raise AgentError(422,"Invalid success count")
     if len(modes)==2 and body.results[0].get("ip")!=body.results[1].get("ip"):
         raise AgentError(422,"Both must use same IP")
+
+def comparison_row(row):
+    # Derive latency aggregates from validated samples, never trust claimed summary.
+    samples=row["samples"]
+    values=sorted(s["duration_ms"] for s in samples if s["ok"])
+    def pct(p):
+        return round(values[max(0,math.ceil(len(values)*p)-1)],2) if values else None
+    def ip(value):
+        try:
+            return str(ipaddress.ip_address(value))
+        except (ValueError,TypeError):
+            return None
+    peer=ip(row.get("ip"))
+    protocols=sorted({s["protocol"] for s in samples if s["ok"] and isinstance(s.get("protocol"),str) and s["protocol"] in ("udp","tcp","dot","h2","h3","doq")})
+    return {"mode":row["mode"],"ip":peer,"protocols":protocols,"count":len(samples),"ok":len(values),
+            "mean":round(statistics.mean(values),2) if values else None,"p95":pct(.95),"p50":pct(.5),
+            "jitter":round(statistics.pstdev(values),2) if values else None,
+            "warmup_ok":row.get("warmup",{}).get("ok") is True if isinstance(row.get("warmup"),dict) else False,
+            "reused":sum(s.get("reused") is True for s in samples if s["ok"]),
+            "unknown_reuse":sum(s.get("reused") is None for s in samples if s["ok"])}
