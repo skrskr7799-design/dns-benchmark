@@ -8,9 +8,9 @@ export interface Result {
 }
 export interface Run { endpoints: string[]; count: number; mode: Mode; family: Family; parallel: number }
 export interface Profile { id: string; name: string; config: Run }
-export interface Status { running: boolean; run_id?: string; state?: string; results: Result[]; done: number; total: number; error?: string }
+export interface Status { running: boolean; run_id?: string; state?: string; revision?:number; results: Result[]; done: number; total: number; error?: string }
 export interface History { time: number; run_id?:string; results: Result[] }
-export interface Sample {endpoint:string;mode:Mode;domain:string;ok:boolean;duration_ms:number|null;connect_ms:number|null;handshake_ms:number|null;protocol:string|null;reused:boolean|null;rcode:string|null;error:string|null}
+export interface Sample {index:number;peer_ip:string|null;endpoint:string;mode:Mode;domain:string;ok:boolean;duration_ms:number|null;connect_ms:number|null;handshake_ms:number|null;protocol:string|null;reused:boolean|null;rcode:string|null;error:string|null}
 export interface SamplePage {total:number;offset:number;items:Sample[]}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
