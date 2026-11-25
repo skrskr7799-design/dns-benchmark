@@ -40,10 +40,13 @@ test('Obsidian responsive matrix',async({page},info)=>{
  const endpoints=['https://cloudflare-dns.com/dns-query','https://dns.google/dns-query','udp://9.9.9.9']
  const rows=endpoints.map((endpoint,i)=>({endpoint,ip:['1.1.1.1','8.8.8.8','9.9.9.9'][i],mode:'cold',family:'ipv4',engine:'python-dns02',protocols:[i===2?'udp':'h2'],count:10,requested_count:10,ok:10,mean:8+i*4,p50:7+i*4,p95:10+i*4,p99:12+i*4,jitter:1.2,error:''}))
  await page.route('**/api/defaults',r=>r.fulfill({json:endpoints}))
- await page.route('**/api/status',r=>r.fulfill({json:{running:false,done:3,total:3,results:rows}}))
+ await page.route('**/api/status',r=>r.fulfill({json:{running:false,run_id:'fixture-run',revision:1,done:3,total:3,results:rows}}))
+ const samples=rows.flatMap((r,i)=>Array.from({length:10},(_,j)=>({index:j,endpoint:r.endpoint,mode:'cold',domain:'example.com',ok:true,duration_ms:7+i*4+(j%4),connect_ms:2,handshake_ms:3,protocol:r.protocols[0],peer_ip:r.ip,reused:false,rcode:'NOERROR',error:null})))
+ await page.route('**/api/v1/runs/fixture-run/samples?*',r=>r.fulfill({json:{total:samples.length,offset:0,items:samples}}))
  await page.route('**/api/history',r=>r.fulfill({json:[{time:1764000000,results:rows},{time:1763900000,results:rows.map(x=>({...x,p95:x.p95+3}))}]}))
  await page.route('**/api/v1/dns/inspect',r=>r.fulfill({json:{name:'example.com.',qtype:'AAAA',comparable:1,groups:1,agreement:null,note:'fixture',results:[{endpoint:endpoints[0],ip:'1.1.1.1',bootstrap_ms:2,duration_ms:8.42,protocol:'h2',peer_ip:'1.1.1.1',error:null,rcode:'NOERROR',flags:['QR','RD','RA','AD'],edns:{version:0,payload:1232},dnssec:{requested_do:true,response_do:false,ad:true,cd:false,independently_validated:false},answer:[{name:'example.com.',type:'AAAA',class:'IN',ttl:300,values:['2001:db8:1234:5678:abcd:ef01:2345:6789']}],authority:[],additional:[],cname_chain:[],fallback:false,outcome:'answer',comparison_group:1}]}}))
 
+ await page.route('**/api/v1/network/routes',r=>r.fulfill({json:{host:'example.com',method:'udp',vantage:'container',results:[{family:'ipv4',ip:'192.0.2.10',dns_ms:2,available:true,reached:true,error:null,hops:[{ttl:1,samples:[{status:'hop',address:'172.18.0.1',rtt_ms:0.4,icmp_type:11,icmp_code:0,errno:null,error:null}]},{ttl:2,samples:[{status:'timeout',address:null,rtt_ms:null,icmp_type:null,icmp_code:null,errno:null,error:null}]},{ttl:3,samples:[{status:'destination',address:'192.0.2.10',rtt_ms:18.2,icmp_type:3,icmp_code:3,errno:null,error:null}]}]}]}}))
  const cert={subject:'CN=example.com',issuer:'CN=Fixture CA',serial:'00:AB:12',not_before:'2026-01-01',not_after:'2027-01-01',days_remaining:37,sha256:'ab'.repeat(32),san:['example.com','www.example.com']}
  const probe={host:'example.com',port:443,family:'ipv4',ip:'192.0.2.10',peer_ip:'192.0.2.10',source_ip:'172.18.0.2',dns_ms:4.2,connect_ms:12.1,handshake_ms:18.4,ttfb_ms:28.6,headers_ms:29,total_ms:65.2,http_status:200,tls_version:'TLSv1.3',alpn:'http/1.1',cipher:'TLS_AES_256_GCM_SHA384',certificate:cert,chain:[cert],verified:true,stage:'complete',error:null,ok:true}
  await page.route('**/api/v1/network/connectivity',r=>r.fulfill({json:{host:'example.com',kind:'tcp',vantage:'container',results:[{family:'ipv4',ip:probe.ip,samples:[probe,{...probe,connect_ms:16.4},{...probe,connect_ms:11.8}],attempted:3,success:3,mean_ms:13.43,variation_ms:2.1}]}}))
@@ -74,6 +77,7 @@ test('Obsidian responsive matrix',async({page},info)=>{
   await page.getByRole('button',{name:'Подготовить тест · 2'}).click()
   await expect(page.locator('#endpoints')).toHaveValue(endpoints.slice(0,2).join('\n'))
   await expect(page.getByRole('heading',{name:'Результаты',exact:true})).toBeVisible()
+  await expect(page.getByRole('img',{name:'Задержка успешных запросов в порядке записей'})).toBeVisible()
   await capture('benchmark')
   await page.goto('/#/history')
   await expect(page.getByRole('heading',{name:'P95 trend',exact:true})).toBeVisible()
@@ -96,8 +100,14 @@ test('Obsidian responsive matrix',async({page},info)=>{
   await capture('connectivity')
   await page.goto('/#/tls')
   await page.getByRole('button',{name:'Проверить TLS',exact:true}).click()
-  await expect(page.getByText('CN=Fixture CA',{exact:true})).toBeVisible()
+  await expect(page.locator('.network-cert').first().getByText('CN=Fixture CA',{exact:true})).toBeVisible()
   await capture('tls')
+  await page.goto('/#/routes')
+  await page.getByRole('button',{name:'Проверить маршрут',exact:true}).click()
+  await expect(page.getByRole('button',{name:/TTL 3/})).toBeVisible()
+  await page.getByRole('button',{name:/TTL 3/}).click()
+  await expect(page.getByRole('heading',{name:'Node details · TTL 3'})).toBeVisible()
+  await capture('routes')
   await page.goto('/#/monitoring')
   await page.getByRole('button',{name:'AdGuard fixture',exact:true}).click()
   await expect(page.getByRole('img',{name:'История задержек'})).toBeVisible()
