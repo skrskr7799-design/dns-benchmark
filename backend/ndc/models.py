@@ -102,3 +102,8 @@ class Connectivity(NetworkTarget):
         if not value.startswith("/") or value.startswith("//") or any(ord(c)<33 or ord(c)>126 or c in "\\?#" for c in value):
             raise ValueError("Use a plain origin-relative ASCII path without query or fragment")
         return value
+
+class RouteTarget(NetworkTarget):
+    max_hops: int=Field(default=12,ge=1,le=20)
+    attempts: int=Field(default=1,ge=1,le=2)
+    port: Literal[33434]=33434
