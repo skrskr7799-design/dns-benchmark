@@ -126,6 +126,30 @@ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
     assert not thread.is_alive()
 print("DNS inspector wire smoke passed")
 
+# Network endpoints: real loopback HTTP and a scoped rejection.
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+class HeadFixture(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(204)
+        self.end_headers()
+    def log_message(self,*args):
+        pass
+http_fixture=ThreadingHTTPServer(("127.0.0.1",0),HeadFixture)
+thread=threading.Thread(target=http_fixture.serve_forever,daemon=True)
+thread.start()
+try:
+    report=request("/api/v1/network/connectivity",{"host":"127.0.0.1","port":http_fixture.server_port,"kind":"http","count":1})
+    row=report["results"][0]["samples"][0]
+    assert row["ok"] and row["http_status"]==204 and row["peer_ip"]=="127.0.0.1",row
+finally:
+    http_fixture.shutdown()
+    http_fixture.server_close()
+    thread.join(3)
+blocked=request("/api/v1/network/tls",{"host":"169.254.169.254","port":443})
+assert not blocked["results"][0]["ok"] and blocked["results"][0]["stage"]=="resolve"
+assert request("/api/v1/capabilities")["connectivity"]
+print("Connectivity and TLS API smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
