@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class Run(BaseModel):
     endpoints: list[str] = Field(min_length=1, max_length=40)
     count: int = Field(default=10, ge=1, le=100)
-    mode: Literal["cold", "warm"] = "cold"
+    mode: Literal["cold", "warm", "both"] = "cold"
     family: Literal["auto", "ipv4", "ipv6"] = "ipv4"
     parallel: int = Field(default=1, ge=1, le=2)
 
