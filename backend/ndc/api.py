@@ -43,8 +43,8 @@ def legacy_history(request: Request):
 
 @router.get("/api/v1/capabilities")
 def capabilities():
-    return {"api_version":1,"engine":"legacy-v0.2","durable_runs":True,"cancel":True,"profiles":True,
-            "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","https","h3","tls","quic"],
+    return {"api_version":1,"engine":"python-dns01","durable_runs":True,"cancel":True,"profiles":True,
+            "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
             "h3_reuse_verified":False,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
