@@ -16,4 +16,4 @@ COPY --from=frontend /web/dist ./web-dist
 USER app
 ENV DATA_DIR=/data
 EXPOSE 8080
-CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8080"]
+CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8080","--no-proxy-headers"]
