@@ -8,7 +8,8 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-import httpx
+import http.client
+import ssl
 from .models import MonitorConfig, Inspect
 from .probes.connectivity import probe_once
 from .probes.inspector import inspect_one
@@ -92,9 +93,11 @@ class MonitorStore:
     def enable(self,id,value):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
-            r=c.execute("SELECT enabled FROM monitors WHERE id=?",(id,)).fetchone()
+            r=c.execute("SELECT enabled,running FROM monitors WHERE id=?",(id,)).fetchone()
             if not r:
                 return None
+            if value and not r[0] and r[1]:
+                raise MonitorBusy('Previous check still running')
             if bool(r[0])!=value:
                 c.execute("UPDATE monitors SET enabled=?,next_at=?,bad=0,good=0 WHERE id=?",(int(value),self.clock(),id))
         return self.get(id)
@@ -161,6 +164,14 @@ class MonitorStore:
             c.execute("DELETE FROM incidents WHERE closed IS NOT NULL AND closed<?",(now-180*86400,))
             c.execute("DELETE FROM outbox WHERE state IN ('sent','failed') AND created<?",(now-30*86400,))
 
+    def prune(self):
+        now=self.clock()
+        with self.db() as c:
+            c.execute("DELETE FROM observations WHERE at<?",(now-30*86400,))
+            c.execute("DELETE FROM incidents WHERE closed IS NOT NULL AND closed<?",(now-180*86400,))
+            c.execute("UPDATE outbox SET state='failed' WHERE state='pending' AND created<?",(now-7*86400,))
+            c.execute("DELETE FROM outbox WHERE state IN ('sent','failed') AND created<?",(now-30*86400,))
+
     def history(self,id,limit):
         with self.db() as c:
             rows=c.execute("SELECT at,payload FROM observations WHERE monitor_id=? ORDER BY id DESC LIMIT ?",(id,limit))
@@ -220,17 +231,21 @@ class Telegram:
 
     def send(self,message):
         # Fixed service endpoint; credentials never returned or logged.
+        conn=http.client.HTTPSConnection("api.telegram.org",timeout=5,context=ssl.create_default_context())
         try:
-            with httpx.Client(timeout=5,trust_env=False,follow_redirects=False) as client:
-                r=client.post("https://api.telegram.org/bot"+self.token+"/sendMessage",json={"chat_id":self.chat,"text":message})
-                return r.status_code==200 and r.json().get("ok") is True
+            conn.request("POST","/bot"+self.token+"/sendMessage",body=json.dumps({"chat_id":self.chat,"text":message}),headers={"Content-Type":"application/json"})
+            r=conn.getresponse()
+            return r.status==200 and json.loads(r.read(32768)).get("ok") is True
         except Exception:
             return False
+        finally:
+            conn.close()
 
 class MonitorScheduler:
     def __init__(self,store,slot,notifier,probe=check):
         self.store=store;self.slot=slot;self.notifier=notifier;self.probe=probe
         self.stop_event=threading.Event()
+        self.next_prune=0
         self.thread=threading.Thread(target=self.loop,daemon=True,name="ndc-monitor")
 
     def start(self):
@@ -241,6 +256,9 @@ class MonitorScheduler:
         self.thread.join(10)
 
     def tick(self):
+        if time.monotonic()>=self.next_prune:
+            self.store.prune()
+            self.next_prune=time.monotonic()+3600
         if self.slot.acquire(blocking=False):
             try:
                 row=self.store.claim()
