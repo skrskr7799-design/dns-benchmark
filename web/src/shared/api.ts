@@ -34,6 +34,15 @@ export interface MonitorConfig {name:string;host:string;port:number;family:'ipv4
 export interface Observation {outcome:'healthy'|'failed'|'degraded'|'unknown';latency_ms:number|null;reason:string|null;details:Record<string,unknown>}
 export interface Monitor {id:string;config:MonitorConfig;enabled:boolean;running:boolean;state:string;next_at:number;last_at:number|null;last_result:Observation|null}
 export interface MonitorOverview {monitors:Monitor[];incidents:{id:number;monitor_id:string;opened:number;closed:number|null;reason:string;resolution:string|null}[];delivery:Record<string,number>;telegram_enabled:boolean}
+export interface AgentNode {id:string;name:string;location:string;revoked:number;enrolled:number;online:boolean;last_seen:number|null;engine:string|null;enroll_until:number|null}
+export interface AgentTask {id:string;agent_id:string;config:Run;state:string;created:number;finished:number|null}
+export interface AgentOverview {agents:AgentNode[];tasks:AgentTask[]}
+export interface AgentInvite {id:string;token:string;expires_at:number}
+export interface BatchSummary {id:string;created:number;config:Run;total:number;finished:number}
+export interface RemoteSeries {mode:'cold'|'warm';ip:string|null;protocols:string[];count:number;ok:number;mean:number|null;p95:number|null;p50:number|null;jitter:number|null;warmup_ok:boolean;reused:number;unknown_reuse:number}
+export interface BatchMember {id:string;agent_id:string;name:string;location:string;state:string;online:boolean;created:number;finished:number|null;last_seen:number|null;error:string|null;results:RemoteSeries[]}
+export interface BatchDetail {id:string;created:number;config:Run;members:BatchMember[]}
+export interface BatchRequest {request_id:string;agent_ids:string[];config:Run}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -50,6 +59,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
+  agents:()=>request<AgentOverview>('/api/v1/agents'),
+  inviteAgent:(name:string,location:string)=>request<AgentInvite>('/api/v1/agents/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,location})}),
+  rotateAgent:(id:string)=>request<AgentInvite>('/api/v1/agents/'+encodeURIComponent(id)+'/rotate',{method:'POST'}),
+  revokeAgent:(id:string)=>request<{revoked:boolean}>('/api/v1/agents/'+encodeURIComponent(id)+'/revoke',{method:'POST'}),
+  agentTask:(id:string)=>request<unknown>('/api/v1/agents/tasks/'+encodeURIComponent(id)),
+  cancelAgentTask:(id:string)=>request<unknown>('/api/v1/agents/tasks/'+encodeURIComponent(id)+'/cancel',{method:'POST'}),
+  batches:()=>request<BatchSummary[]>('/api/v1/agents/batches'),
+  batch:(id:string)=>request<BatchDetail>('/api/v1/agents/batches/'+encodeURIComponent(id)),
+  createBatch:(body:BatchRequest)=>request<{id:string;duplicate:boolean}>('/api/v1/agents/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  cancelBatch:(id:string)=>request<{cancelled:number}>('/api/v1/agents/batches/'+encodeURIComponent(id)+'/cancel',{method:'POST'}),
   monitoring:()=>request<MonitorOverview>('/api/v1/monitoring'),
   createMonitor:(config:MonitorConfig)=>request<Monitor>('/api/v1/monitoring/monitors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   enableMonitor:(id:string,enabled:boolean)=>request<Monitor>('/api/v1/monitoring/monitors/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})}),
