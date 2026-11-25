@@ -11,6 +11,9 @@ from .probes.connectivity import connectivity, inspect_tls, ping_capabilities
 from .probes.inspector import inspect
 from .storage import Busy, TERMINAL
 
+from .models import DiagnosticConfig
+from .diagnostics import diagnose
+
 router=APIRouter()
 inspection_slot=threading.BoundedSemaphore(1)
 
@@ -52,7 +55,7 @@ def legacy_history(request: Request):
 def capabilities():
     return {"api_version":1,"engine":"python-dns02","durable_runs":True,"cancel":True,"profiles":True,
             "events":"snapshot-sse","max_active_jobs":8,"protocols":["udp","tcp","https","h3","tls","quic"],
-            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"monitoring":True,"agents":True,"authenticated":True}
+            "h3_reuse_verified":False,"both":True,"raw_samples":True,"dns_inspector":True,"connectivity":True,"tls_inspector":True,"icmp":ping_capabilities(),"routes":route_capabilities(),"monitoring":True,"agents":True,"diagnostics":True,"authenticated":True}
 
 @router.post("/api/v1/runs",status_code=202)
 def create_run(request: Request, body: Run):
@@ -182,5 +185,14 @@ def check_routes(request: Request, body: RouteTarget):
         raise HTTPException(409,"Interactive diagnostic already running")
     try:
         return trace(body)
+    finally:
+        inspection_slot.release()
+
+@router.post("/api/v1/diagnostics")
+def diagnostic_report(request: Request, body: DiagnosticConfig):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"Interactive diagnostic already running")
+    try:
+        return diagnose(body)
     finally:
         inspection_slot.release()
