@@ -30,6 +30,10 @@ export interface RouteConfig {host:string;family:NetFamily;max_hops:number;attem
 export interface RouteSample {status:string;address:string|null;rtt_ms:number|null;icmp_type:number|null;icmp_code:number|null;errno:number|null;error:string|null}
 export interface RouteResult {family:string;ip:string|null;dns_ms:number|null;available:boolean;reached:boolean;hops:{ttl:number;samples:RouteSample[]}[];error:string|null}
 export interface RouteReport {host:string;method:string;vantage:string;results:RouteResult[]}
+export interface MonitorConfig {name:string;host:string;port:number;family:'ipv4'|'ipv6';kind:'tcp'|'http'|'https'|'tls'|'dns';path:string;count:1;endpoint:string;interval_seconds:number;failure_count:number;recovery_count:number;latency_ms:number|null;expiry_days:number;enabled:boolean;notify:boolean}
+export interface Observation {outcome:'healthy'|'failed'|'degraded'|'unknown';latency_ms:number|null;reason:string|null;details:Record<string,unknown>}
+export interface Monitor {id:string;config:MonitorConfig;enabled:boolean;running:boolean;state:string;next_at:number;last_at:number|null;last_result:Observation|null}
+export interface MonitorOverview {monitors:Monitor[];incidents:{id:number;monitor_id:string;opened:number;closed:number|null;reason:string;resolution:string|null}[];delivery:Record<string,number>;telegram_enabled:boolean}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -46,6 +50,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
+  monitoring:()=>request<MonitorOverview>('/api/v1/monitoring'),
+  createMonitor:(config:MonitorConfig)=>request<Monitor>('/api/v1/monitoring/monitors',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
+  enableMonitor:(id:string,enabled:boolean)=>request<Monitor>('/api/v1/monitoring/monitors/'+encodeURIComponent(id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})}),
+  deleteMonitor:(id:string)=>request<void>('/api/v1/monitoring/monitors/'+encodeURIComponent(id),{method:'DELETE'}),
+  monitorHistory:(id:string)=>request<(Observation&{at:number})[]>('/api/v1/monitoring/monitors/'+encodeURIComponent(id)+'/history'),
   routes:(config:RouteConfig)=>request<RouteReport>('/api/v1/network/routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   capabilities:()=>request<{icmp:{ipv4:boolean;ipv6:boolean};routes:{ipv4:boolean;ipv6:boolean}}>('/api/v1/capabilities'),
   connectivity:(config:NetConfig)=>request<NetworkReport>('/api/v1/network/connectivity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
