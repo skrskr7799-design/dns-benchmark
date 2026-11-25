@@ -4,6 +4,8 @@ from fastapi import APIRouter,Request,Query,HTTPException
 from .evidence import Source,Kind,Outcome
 from .dns_cohorts import aggregate,NarrowQuery
 from .dns_intelligence import rank
+from .observatory import analyze
+import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
 EvidenceKind=Literal["observations","events"]
@@ -47,6 +49,37 @@ def dns_ranking(request:Request,since:float=Query(...,ge=0,le=253402300799),
         raise HTTPException(422,"Invalid ranking parameters") from None
     result["coverage"].update({"time_basis":"received_at","since":since,"before":before,
         "retained_usage_at_read":usage,"source_and_derived_status_not_atomic":True})
+    return result
+
+@router.get("/observatory/monitors")
+def observatory_monitors(request:Request):
+    return [{"id":m["id"],"name":m["config"]["name"],"kind":m["config"]["kind"],
+        "enabled":m["enabled"],"interval_seconds":m["config"]["interval_seconds"],
+        "state":m["state"],"last_at":m["last_at"]} for m in request.app.state.monitors.list()]
+
+@router.get("/observatory/monitors/{id}")
+def observatory_monitor(request:Request,id:str,
+    since:float=Query(...,ge=0,le=253402300799),before:float=Query(...,ge=0,le=253402300799)):
+    import re
+    if not re.fullmatch(r"[a-f0-9]{32}",id):
+        raise HTTPException(404,"Monitor not found")
+    state=request.app.state
+    monitor=state.monitors.get(id)
+    if monitor is None:
+        raise HTTPException(404,"Monitor not found")
+    try:
+        now=time.time()
+        if before>now+60:
+            raise ValueError("Future window")
+        rows,usage=state.evidence.observatory_rows(id,since=since,before=before)
+        result=analyze(rows,monitor,since=since,before=before,now=now)
+    except NarrowQuery:
+        raise HTTPException(422,"Narrow the observatory time range") from None
+    except ValueError:
+        raise HTTPException(422,"Invalid observatory time range") from None
+    result["coverage"]={"retained_usage_at_read":usage,"producer_status_at_response":state.monitors.evidence_status(),
+        "stream_error":state.evidence_drain.errors.get("monitor-v1"),"complete_window_verified":False,
+        "source_and_derived_status_not_atomic":True}
     return result
 
 @router.get("/{kind}")

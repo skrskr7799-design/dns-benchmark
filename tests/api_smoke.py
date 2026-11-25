@@ -14,6 +14,7 @@ base='http://127.0.0.1:8080'
 expect_error(urllib.request.Request(base+'/api/status'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/observations'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/events'),401)
+expect_error(urllib.request.Request(base+'/api/v1/intelligence/observatory/monitors'),401)
 login=urllib.request.Request(base+'/api/auth/login',data=json.dumps({'password':os.environ['NDC_OWNER_PASSWORD']}).encode(),headers={'Content-Type':'application/json','X-NDC-Request':'1'})
 with opener.open(login,timeout=10) as response:
     csrf=json.load(response)['csrf']
@@ -86,6 +87,8 @@ assert ranking["methodology"]=="dns-intelligence-v1"
 assert ranking["coverage"]["complete_window_verified"] is False
 assert all(g["recommended_target_id"] is None for g in ranking["groups"])
 expect_error(urllib.request.Request(base+ranking_path+"&preset=bad"),422)
+assert isinstance(request("/api/v1/intelligence/observatory/monitors"),list)
+expect_error(urllib.request.Request(base+"/api/v1/intelligence/observatory/monitors/"+"0"*32+"?since=1&before=2"),404)
 print("Authenticated intelligence read API, benchmark ingestion, cohort analysis and conservative ranking passed")
 with opener.open("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
     assert b"event: snapshot" in response.read()

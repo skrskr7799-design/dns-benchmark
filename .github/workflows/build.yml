@@ -101,6 +101,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_dns_cohorts.py
       - name: DNS Intelligence matched ranking and recommendation policy
         run: docker exec -i benchmark python - < tests/test_dns_intelligence.py
+      - name: Observatory baseline, anomaly and coverage semantics
+        run: docker exec -i benchmark python - < tests/test_observatory.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

@@ -341,6 +341,23 @@ class EvidenceStore:
             usage=c.execute("SELECT rows,bytes,evicted,last_evicted_at FROM source_usage WHERE source_kind=?",(source,)).fetchone()
             return [self.item(r,"received_at") for r in rows],dict(usage) if usage else {"rows":0,"bytes":0,"evicted":0,"last_evicted_at":None}
 
+    def observatory_rows(self,monitor_id,*,since,before):
+        from .observatory import MAX_ROWS,MAX_WINDOW
+        from .dns_cohorts import NarrowQuery
+        if not math.isfinite(since) or not math.isfinite(before) or not 0<=since<before or before-since>MAX_WINDOW:
+            raise ValueError("Invalid observatory range")
+        with self.db() as c:
+            c.execute("BEGIN")
+            # Source time is the controller's commit timestamp, not drain time.
+            rows=c.execute("""SELECT seq,id,received_at,payload FROM observations
+                WHERE source_kind='monitor' AND json_extract(payload,'$.source_id')=?
+                AND json_extract(payload,'$.observed_at')>=? AND json_extract(payload,'$.observed_at')<?
+                ORDER BY seq LIMIT ?""",(monitor_id,since,before,MAX_ROWS+1)).fetchall()
+            if len(rows)>MAX_ROWS:
+                raise NarrowQuery("Too many monitor observations")
+            usage=c.execute("SELECT rows,bytes,evicted,last_evicted_at FROM source_usage WHERE source_kind='monitor'").fetchone()
+            return [self.item(r,"received_at") for r in rows],dict(usage) if usage else {"rows":0,"bytes":0,"evicted":0,"last_evicted_at":None}
+
     def detail(self,kind,id):
         if kind not in ("observations","events"):
             raise ValueError("Invalid evidence kind")
