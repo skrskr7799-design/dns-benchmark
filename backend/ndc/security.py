@@ -1,4 +1,5 @@
 import hashlib
+import re
 import hmac
 import os
 import secrets
@@ -29,6 +30,8 @@ class Security:
         self.lock=threading.Lock()
         self.attempts=deque()
         self.writes=deque()
+        self.agent_requests=deque()
+        self.agent_enrollments=deque()
         self.secure=os.getenv("NDC_SECURE_COOKIE","1")!="0"
         self.origin=os.getenv("NDC_ORIGIN","").rstrip("/")
 
@@ -92,6 +95,22 @@ async def guard(request,call_next):
     if not path.startswith("/api/"):
         return await call_next(request)
     security=request.app.state.security
+    machine=bool(re.fullmatch(r"/api/v1/agents/machine/(?:enroll|poll|heartbeat|results/[a-f0-9]{32})",path)) and request.method=="POST"
+    if machine:
+        queue=security.agent_enrollments if path.endswith("/enroll") else security.agent_requests
+        if not security.limit(queue,30 if path.endswith("/enroll") else 600):
+            return JSONResponse({"detail":"Agent rate limit"},429)
+        if request.headers.get("origin") or request.cookies.get(COOKIE):
+            return JSONResponse({"detail":"Machine credentials only"},403)
+        body=bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body)>131072:
+                return JSONResponse({"detail":"Request too large"},413)
+        request._body=bytes(body)
+        response=await call_next(request)
+        response.headers["Cache-Control"]="no-store"
+        return response
     public=path in ("/api/auth/login","/api/auth/session")
     write=request.method not in ("GET","HEAD","OPTIONS")
     csrf=security.session(request)
