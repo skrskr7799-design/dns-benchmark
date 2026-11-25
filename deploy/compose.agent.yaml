@@ -1,7 +1,7 @@
 name: ndc-agent
 services:
   agent:
-    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-dist-01
+    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-dist-02
     command: ["python","-m","backend.ndc.agent_client"]
     environment:
       NDC_CONTROLLER_URL: "${NDC_CONTROLLER_URL:?Set verified HTTPS controller origin}"
