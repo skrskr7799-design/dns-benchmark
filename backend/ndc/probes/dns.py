@@ -3,31 +3,35 @@ from urllib.parse import urlsplit
 from contextlib import ExitStack
 from collections import Counter
 import dns.message, dns.query, dns.rcode, dns.quic
+from ..scope import validate_ip
 
 domains = ["example.com", "example.org", "iana.org", "wikipedia.org", "debian.org", "python.org", "kernel.org", "mozilla.org"]
 def resolve(u, family):
     af = {'auto': socket.AF_UNSPEC, 'ipv4': socket.AF_INET, 'ipv6': socket.AF_INET6}[family]
     addresses = socket.getaddrinfo(u.hostname, u.port or 443, af, socket.SOCK_STREAM)
-    return addresses[0][4][0]
+    # Reject a mixed permitted/forbidden DNS answer rather than silently bypassing scope.
+    checked=[validate_ip(a[4][0]) for a in addresses]
+    return checked[0]
 
 def query(endpoint, domain, ip, stack, resources):
     u = urlsplit(endpoint)
+    ip = validate_ip(ip)
     q = dns.message.make_query(domain, "A")
     if u.scheme in ("https", "h3"):
         if u.scheme == "https" and "http" not in resources:
-            resources["http"] = stack.enter_context(httpx.Client(http2=True, trust_env=False))
-        if u.scheme == "h3" and "quic" not in resources:
-            resources["quic"] = stack.enter_context(dns.quic.SyncQuicManager())
-        return dns.query.https(q, endpoint.replace("h3://", "https://", 1), timeout=5, bootstrap_address=ip, session=resources.get("http") or resources.get("quic"), http_version=dns.query.HTTPVersion.H3 if u.scheme == "h3" else dns.query.HTTPVersion.H2)
+            transport = dns.query._HTTPTransport(bootstrap_address=ip,http1=False,http2=True,verify=True,trust_env=False)
+            resources["http"] = stack.enter_context(httpx.Client(transport=transport,http1=False,http2=True,trust_env=False,follow_redirects=False))
+        return dns.query.https(q, endpoint.replace("h3://", "https://", 1), timeout=5, port=u.port or 443, bootstrap_address=ip, session=resources.get("http"), verify=True, http_version=dns.query.HTTPVersion.H3 if u.scheme == "h3" else dns.query.HTTPVersion.H2)
     if u.scheme == "tls":
         if "tls" not in resources:
             raw = stack.enter_context(socket.create_connection((ip,u.port or 853),timeout=5))
             resources["tls"] = stack.enter_context(ssl.create_default_context().wrap_socket(raw,server_hostname=u.hostname))
+            resources["tls"].setblocking(False)
         return dns.query.tls(q, ip, port=u.port or 853, timeout=5, sock=resources["tls"])
     if u.scheme == "quic":
         if "quic" not in resources:
-            resources["quic"] = stack.enter_context(dns.quic.SyncQuicManager())
-        return dns.query.quic(q, ip, port=u.port or 853, timeout=5, server_hostname=u.hostname, connection=resources["quic"].connect(ip,u.port or 853,server_hostname=u.hostname))
+            resources["quic"] = stack.enter_context(dns.quic.SyncQuicManager(verify_mode=True,server_name=u.hostname))
+        return dns.query.quic(q, ip, port=u.port or 853, timeout=5, server_hostname=u.hostname, verify=True, connection=resources["quic"].connect(ip,u.port or 853))
     return dns.query.udp(q, ip, port=u.port or 53, timeout=5)
 
 def measure(endpoint, count, mode, family, cancelled):
