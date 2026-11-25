@@ -126,3 +126,21 @@ class MonitorConfig(Connectivity):
     @classmethod
     def validate_endpoint(cls,value):
         return Run(endpoints=[value]).endpoints[0]
+
+class DiagnosticThresholds(BaseModel):
+    dns_ms: float=Field(default=250,gt=0,le=60000)
+    connect_ms: float=Field(default=300,gt=0,le=60000)
+    handshake_ms: float=Field(default=500,gt=0,le=60000)
+    ttfb_ms: float=Field(default=1000,gt=0,le=60000)
+
+class DiagnosticConfig(Connectivity):
+    kind: Literal["tcp","http","https","tls"]="https"
+    count: Literal[1]=1
+    endpoints: list[str]=Field(default_factory=list,max_length=2)
+    resolver_family: Literal["ipv4","ipv6","auto"]="ipv4"
+    thresholds: DiagnosticThresholds=Field(default_factory=DiagnosticThresholds)
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_resolvers(cls,endpoints):
+        return Run(endpoints=endpoints).endpoints if endpoints else []
