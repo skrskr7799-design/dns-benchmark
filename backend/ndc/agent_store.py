@@ -89,7 +89,13 @@ class AgentStore:
         now=self.clock()
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='leased' AND lease_until<=?",(now,now))
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='queued' AND created<=?",(now,now-86400))
-        c.execute("DELETE FROM tasks WHERE finished IS NOT NULL AND finished<?",(now-30*86400,))
+        # Preserve all members until the whole batch is terminal and old.
+        c.execute("""DELETE FROM tasks WHERE finished IS NOT NULL AND finished<? AND
+            (id NOT IN (SELECT task_id FROM batch_members) OR id IN (
+                SELECT m.task_id FROM batch_members m WHERE m.batch_id IN (
+                    SELECT m2.batch_id FROM batch_members m2 JOIN tasks t ON t.id=m2.task_id
+                    GROUP BY m2.batch_id HAVING count(t.finished)=count(*) AND max(t.finished)<?)))""",
+            (now-30*86400,now-30*86400))
         c.execute("DELETE FROM batches WHERE NOT EXISTS (SELECT 1 FROM batch_members WHERE batch_id=batches.id)")
         c.execute("DELETE FROM agent_audit WHERE at<?",(now-180*86400,))
 
@@ -274,7 +280,7 @@ def validate_result(cfg,body):
         if not isinstance(samples,list) or len(samples)!=cfg.count:
             raise AgentError(422,"Invalid sample count")
         for i,s in enumerate(samples):
-            if not isinstance(s,dict) or s.get("index")!=i or s.get("domain")!=domains[i%len(domains)] or s.get("qtype")!="A" or type(s.get("ok")) is not bool:
+            if not isinstance(s,dict) or type(s.get("index")) is not int or s.get("index")!=i or s.get("domain")!=domains[i%len(domains)] or s.get("qtype")!="A" or type(s.get("ok")) is not bool:
                 raise AgentError(422,"Invalid sample")
             latency=s.get("duration_ms")
             if latency is not None and (type(latency) not in (int,float) or not 0<=latency<=300000):
