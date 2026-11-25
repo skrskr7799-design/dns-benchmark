@@ -47,6 +47,9 @@ export interface DiagnosticThresholds {dns_ms:number;connect_ms:number;handshake
 export interface DiagnosticConfig extends NetTarget {kind:'tcp'|'http'|'https'|'tls';path:string;endpoints:string[];resolver_family:Family;thresholds:DiagnosticThresholds}
 export interface Finding {code:string;layer:string;confidence:'observed'|'possible';evidence:Record<string,unknown>;action:string}
 export interface DiagnosticReport {rule_version:string;host:string;port:number;kind:string;vantage:string;started_at:number;finished_at:number;thresholds:DiagnosticThresholds;results:{family:string;probe:NetworkProbe;dns:InspectionResult[];dns_skipped:string|null;dns_agreement:boolean|null;findings:Finding[]}[];limitations:string[]}
+export interface IntegrationStatus {adguard_configured:boolean;throughput_configured:boolean}
+export interface AdGuardSnapshot {configured:boolean;errors:Record<string,string>;at:number;version:string|null;protection_enabled:boolean|null;running:boolean|null;queries:number|null;blocked:number|null;mean_ms:number|null;upstreams:string[];upstreams_omitted:number|null;upstream_timings:{upstream:string;mean_ms:number}[];time_units:string|null}
+export interface ThroughputReport {bytes:number;duration_ms:number;mbps:number|null;reason:string;body_started:boolean;byte_limit:number;vantage:string;method:string}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -63,6 +66,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
+  integrations:()=>request<IntegrationStatus>('/api/v1/integrations'),
+  adguard:()=>request<AdGuardSnapshot>('/api/v1/integrations/adguard',{method:'POST'}),
+  throughput:()=>request<ThroughputReport>('/api/v1/integrations/throughput',{method:'POST'}),
   diagnose:(config:DiagnosticConfig)=>request<DiagnosticReport>('/api/v1/diagnostics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   agents:()=>request<AgentOverview>('/api/v1/agents'),
   inviteAgent:(name:string,location:string)=>request<AgentInvite>('/api/v1/agents/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,location})}),
