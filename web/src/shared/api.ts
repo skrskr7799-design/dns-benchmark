@@ -26,6 +26,10 @@ export interface PingResult {family:string;ip:string|null;source_ip:string|null;
 export interface NetworkGroup {family:string;ip:string|null;samples:NetworkProbe[];attempted:number;success:number;mean_ms:number|null;variation_ms:number|null}
 export interface NetworkReport {host:string;kind:NetKind;vantage:string;results:(PingResult|NetworkGroup)[]}
 export interface TLSReport {host:string;vantage:string;results:NetworkProbe[]}
+export interface RouteConfig {host:string;family:NetFamily;max_hops:number;attempts:number}
+export interface RouteSample {status:string;address:string|null;rtt_ms:number|null;icmp_type:number|null;icmp_code:number|null;errno:number|null;error:string|null}
+export interface RouteResult {family:string;ip:string|null;dns_ms:number|null;available:boolean;reached:boolean;hops:{ttl:number;samples:RouteSample[]}[];error:string|null}
+export interface RouteReport {host:string;method:string;vantage:string;results:RouteResult[]}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -42,7 +46,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
-  capabilities:()=>request<{icmp:{ipv4:boolean;ipv6:boolean}}>('/api/v1/capabilities'),
+  routes:(config:RouteConfig)=>request<RouteReport>('/api/v1/network/routes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
+  capabilities:()=>request<{icmp:{ipv4:boolean;ipv6:boolean};routes:{ipv4:boolean;ipv6:boolean}}>('/api/v1/capabilities'),
   connectivity:(config:NetConfig)=>request<NetworkReport>('/api/v1/network/connectivity',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   tls:(config:NetTarget)=>request<TLSReport>('/api/v1/network/tls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   inspect:(config:InspectConfig)=>request<Inspection>('/api/v1/dns/inspect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
