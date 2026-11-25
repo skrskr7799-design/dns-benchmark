@@ -124,3 +124,19 @@ test('agents workspace creates a batch and shows both sites',async({page})=>{
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+test('smart diagnostics separates observations from hypotheses',async({page})=>{
+ await login(page)
+ await page.route('**/api/v1/diagnostics',async route=>{
+   expect(route.request().postDataJSON()).toMatchObject({host:'example.com',kind:'https',port:443,family:'ipv4',endpoints:[]})
+   await route.fulfill({json:{rule_version:'1',host:'example.com',port:443,kind:'https',vantage:'container',started_at:1,finished_at:2,thresholds:{dns_ms:250,connect_ms:300,handshake_ms:500,ttfb_ms:1000},results:[{family:'ipv4',probe:{ip:'192.0.2.1',stage:'tcp',ok:false,error:'TimeoutError',dns_ms:2,connect_ms:null,handshake_ms:null,ttfb_ms:null,http_status:null,verified:null},dns:[],dns_skipped:'No explicit resolver selected',dns_agreement:null,findings:[{code:'tcp_failed',layer:'tcp',confidence:'observed',evidence:{error:'TimeoutError'},action:'Inspect service'}]}],limitations:[]}})
+ })
+ await page.getByRole('link',{name:'Smart Diagnostics',exact:true}).click()
+ await page.getByRole('button',{name:'Запустить диагностику'}).click()
+ await expect(page.getByText('TCP-соединение не установлено',{exact:true})).toBeVisible()
+ await expect(page.getByText('Наблюдение',{exact:true})).toBeVisible()
+ await page.getByText('Подтверждающие данные',{exact:true}).click()
+ await expect(page.getByText(/"error": "TimeoutError"/)).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
