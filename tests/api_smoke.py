@@ -193,6 +193,47 @@ finally:
     thread.join(3)
 print("Monitoring API and live scheduler smoke passed")
 
+# Exercise a real outbound agent against the controller and local DNS fixture.
+import tempfile
+from pathlib import Path
+from backend.ndc.agent_client import Agent
+from unittest.mock import patch
+expect_error(urllib.request.Request(base+"/api/v1/agents/machine/poll",data=b'{}',headers={"Content-Type":"application/json"}),403)
+invite=request("/api/v1/agents/invite",{"name":"CI agent","location":"loopback"})
+with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):
+    root=Path(tmp)
+    (root/"enrollment-token").write_text(invite["token"])
+    with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+        sock.bind(("127.0.0.1",0))
+        sock.settimeout(10)
+        endpoint=f"udp://127.0.0.1:{sock.getsockname()[1]}"
+        agent=Agent(root,base,[endpoint])
+        try:
+            agent.enroll()
+            assert not (root/"enrollment-token").exists()
+            task=request("/api/v1/agents/"+invite["id"]+"/tasks",{"endpoints":[endpoint],"count":1,"mode":"cold"})["id"]
+            def respond_agent():
+                data,peer=sock.recvfrom(65535)
+                q=dns.message.from_wire(data)
+                r=dns.message.make_response(q)
+                r.answer.append(dns.rrset.from_text(q.question[0].name,60,"IN","A","192.0.2.1"))
+                sock.sendto(r.to_wire(),peer)
+            thread=threading.Thread(target=respond_agent,daemon=True)
+            thread.start()
+            agent.step()
+            thread.join(2)
+            assert not thread.is_alive()
+            detail=request("/api/v1/agents/tasks/"+task)
+            assert detail["state"]=="completed",detail
+            assert detail["payload"]["results"][0]["ok"]==1
+            assert not agent.spool.exists()
+            assert request("/api/v1/agents")["agents"][0]["online"]
+            request("/api/v1/agents/"+invite["id"]+"/revoke",{})
+            assert agent.post("poll",{"version":"1","engine":"python-dns02"}).status_code==401
+        finally:
+            agent.client.close()
+print("Outbound agent and real DNS smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
