@@ -99,3 +99,28 @@ test('monitoring creates a paused monitor and displays history',async({page})=>{
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+test('agents workspace creates a batch and shows both sites',async({page})=>{
+ await login(page)
+ const ids=['a'.repeat(32),'b'.repeat(32)],bid='c'.repeat(32)
+ const nodes=ids.map((id,i)=>({id,name:i?'Berlin':'London',location:i?'Germany':'UK',revoked:0,enrolled:1,online:i===0,last_seen:i?null:Date.now()/1000,engine:'python-dns02',enroll_until:null}))
+ const config={endpoints:['https://cloudflare-dns.com/dns-query'],mode:'both',family:'ipv4',count:5,parallel:1}
+ await page.route('**/api/v1/agents',route=>route.fulfill({json:{agents:nodes,tasks:[]}}))
+ await page.route('**/api/v1/agents/batches',async route=>{
+   if(route.request().method()==='POST'){
+     expect(route.request().postDataJSON()).toMatchObject({agent_ids:ids,config})
+     await route.fulfill({status:202,json:{id:bid,duplicate:false}})
+   }else await route.fulfill({json:[]})
+ })
+ await page.route('**/api/v1/agents/batches/'+bid,route=>route.fulfill({json:{id:bid,created:1,config,members:nodes.map((a,i)=>({id:a.id,agent_id:a.id,name:a.name,location:a.location,state:i?'queued':'completed',online:a.online,created:1,finished:i?null:2,last_seen:a.last_seen,error:null,results:i?[]:[{mode:'cold',ip:'1.1.1.1',protocols:['h2'],count:5,ok:5,mean:10,p95:12,p50:10,jitter:1,warmup_ok:false,reused:0,unknown_reuse:0}]}))}}))
+ await page.getByRole('link',{name:'Agents',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Agents',exact:true})).toBeVisible()
+ await page.getByRole('checkbox',{name:'London · Online'}).check()
+ await page.getByRole('checkbox',{name:'Berlin · Offline'}).check()
+ await page.getByRole('button',{name:'Запустить сравнение'}).click()
+ await expect(page.getByRole('heading',{name:'Сравнение узлов'})).toBeVisible()
+ await expect(page.getByRole('cell',{name:'Нет измерений',exact:true})).toBeVisible()
+ await expect(page.getByText('12.00 мс',{exact:true})).toBeVisible()
+ await page.setViewportSize({width:390,height:844})
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
