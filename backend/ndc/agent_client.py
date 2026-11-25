@@ -111,7 +111,19 @@ class Agent:
         atomic(self.spool,{"state":"executing","id":task["id"],"lease":task["lease"]})
         cancel=threading.Event()
         timer=threading.Timer(min(240,task["lease_seconds"]-15),cancel.set)
+        done=threading.Event()
+        def heartbeat():
+            while not done.wait(10):
+                try:
+                    response=self.post("heartbeat",{"version":VERSION,"engine":ENGINE,"task_id":task["id"],"lease":task["lease"]})
+                    if response.status_code==401 or (response.status_code==200 and not response.json()["active"]):
+                        cancel.set()
+                        return
+                except httpx.HTTPError:
+                    pass
+        worker=threading.Thread(target=heartbeat,daemon=True)
         timer.start()
+        worker.start()
         try:
             rows=execute(task,self.allowed,cancel)
             body={"lease":task["lease"],"status":"completed","results":rows}
@@ -119,6 +131,8 @@ class Agent:
             body={"lease":task["lease"],"status":"failed","results":[],"error":type(exc).__name__+": "+str(exc)[:200]}
         finally:
             timer.cancel()
+            done.set()
+            worker.join(11)
         atomic(self.spool,{"state":"ready","id":task["id"],"body":body})
         self.flush()
 
