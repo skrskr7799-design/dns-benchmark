@@ -14,6 +14,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      NDC_TEST_PASSWORD: ci-only-fixture-password-2026
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,13 +34,15 @@ jobs:
       - run: docker build -t dns-benchmark:test .
       - name: Start test container
         run: |
-          docker run -d --name benchmark -p 127.0.0.1:8080:8080 dns-benchmark:test
+          docker run -d --name benchmark -e NDC_OWNER_PASSWORD="$NDC_TEST_PASSWORD" -e NDC_SECURE_COOKIE=0 -e NDC_ALLOWED_CIDRS=127.0.0.1/32 -p 127.0.0.1:8080:8080 dns-benchmark:test
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
           curl -fsS http://127.0.0.1:8080/health
-          curl -fsS http://127.0.0.1:8080/api/defaults
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/defaults)" = 401
           docker exec benchmark python -c 'import dns.query; print(dns.query.HTTPVersion.H3)'
       - name: Persistent job lifecycle tests
         run: docker exec -i benchmark python - < tests/test_jobs.py
+      - name: Destination scope tests
+        run: docker exec -i benchmark python - < tests/test_security.py
       - name: Browser smoke
         working-directory: web
         run: |
@@ -50,11 +54,13 @@ jobs:
         if: failure()
         run: docker logs benchmark || true
       - name: Publish image
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend')
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TAG=edge
+          elif [ "${{ github.ref }}" = "refs/heads/work/fnd-03-security" ]; then
+            TAG=preview-fnd-03
           elif [ "${{ github.ref }}" = "refs/heads/work/fnd-02-backend" ]; then
             TAG=preview-fnd-02
           else
