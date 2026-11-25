@@ -56,11 +56,13 @@ jobs:
         if: failure()
         run: docker logs benchmark || true
       - name: Publish image
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine')
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TAG=edge
+          elif [ "${{ github.ref }}" = "refs/heads/work/dns-02-benchmark" ]; then
+            TAG=preview-dns-02
           elif [ "${{ github.ref }}" = "refs/heads/work/dns-01-engine" ]; then
             TAG=preview-dns-01
           elif [ "${{ github.ref }}" = "refs/heads/work/fnd-03-security" ]; then
