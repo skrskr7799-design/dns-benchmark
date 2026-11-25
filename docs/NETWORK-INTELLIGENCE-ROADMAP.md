@@ -93,5 +93,6 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-02B | implemented / repaired and verified (45658906221) | DNS Intelligence UI, real ranking API, responsive fixture tests |
 | NIP-02C1 | implemented / CI passed (45658906221) | accessible filter fix, controlled UDP-to-ranking acceptance, backup replay |
 | NIP-02C2 | implemented / CI passed (45660254579) | reviewed ten DNS Intelligence screenshots; compact mobile layout repair and regression |
-| NIP-03A1 | implemented candidate / CI pending | [Observatory baseline and anomaly read model](NIP-03.md) |
-| NIP-03A2..13 | planned | durable signals, maintenance, UI and remaining modules; physical budget and shared scheduler hardening remain open |
+| NIP-03A1 | implemented / CI passed (45662383202) | [Observatory baseline and anomaly read model](NIP-03.md) |
+| NIP-03A2 | implemented candidate / CI pending | transactional Observatory state, journal, pause/resume boundaries and event replay |
+| NIP-03B..13 | planned | UI, pause-aware charts, scheduled maintenance and remaining modules; physical budget and shared scheduler hardening remain open |

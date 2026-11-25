@@ -12,6 +12,7 @@ import http.client
 import ssl
 from .models import MonitorConfig, Inspect
 from .monitor_evidence import project,encode
+from . import observatory_store
 from .probes.connectivity import probe_once
 from .probes.inspector import inspect_one
 
@@ -40,7 +41,7 @@ class MonitorStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1):
+            if version not in (0,1,2):
                 raise RuntimeError("Unsupported monitoring schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -76,6 +77,11 @@ class MonitorStore:
                 PRAGMA user_version=1;
                 COMMIT;
                 """)
+            if version<2:
+                c.execute("BEGIN IMMEDIATE")
+                observatory_store.install(c,self.clock())
+                c.execute("PRAGMA user_version=2")
+                c.commit()
             # Missed checks are not synthesized; a claimed check is retried on next tick.
             c.execute("UPDATE monitors SET running=0,next_at=? WHERE running=1",(self.clock(),))
             c.execute("UPDATE outbox SET state='pending' WHERE state='sending'")
@@ -107,6 +113,7 @@ class MonitorStore:
                 raise MonitorBusy("Maximum 20 monitors")
             c.execute("INSERT INTO monitors(id,config,enabled,next_at) VALUES(?,?,?,?)",
                       (id,config.model_dump_json(),int(config.enabled),self.clock()))
+            observatory_store.create(c,id,config.enabled,self.clock())
         return self.get(id)
 
     def enable(self,id,value):
@@ -118,7 +125,9 @@ class MonitorStore:
             if value and not r[0] and r[1]:
                 raise MonitorBusy('Previous check still running')
             if bool(r[0])!=value:
-                c.execute("UPDATE monitors SET enabled=?,next_at=?,bad=0,good=0 WHERE id=?",(int(value),self.clock(),id))
+                now=self.clock()
+                c.execute("UPDATE monitors SET enabled=?,next_at=?,bad=0,good=0 WHERE id=?",(int(value),now,id))
+                observatory_store.boundary(c,id,value,now)
         return self.get(id)
 
     def delete(self,id):
@@ -180,12 +189,15 @@ class MonitorStore:
             # Keep original monitoring and notifications authoritative at capacity.
             # A full analytics queue records an explicit coverage gap without consuming a sequence.
             if c.execute("SELECT count(*) FROM monitor_evidence_outbox").fetchone()[0]>=self.max_evidence_pending:
+                observation,_=project(id,1,cfg,result,now)
+                observatory_store.finish(c,id,observation,cfg.interval_seconds,evidence_available=False)
                 c.execute("""UPDATE monitor_evidence_coverage SET dropped=dropped+1,
                     dropped_transitions=dropped_transitions+?,first_dropped_at=coalesce(first_dropped_at,?),last_dropped_at=?
                     WHERE singleton=1""",(int(transition is not None),now,now))
             else:
                 seq=c.execute("INSERT INTO monitor_evidence_outbox(payload) VALUES('')").lastrowid
                 observation,events=project(id,seq,cfg,result,now,transition)
+                events+=observatory_store.finish(c,id,observation,cfg.interval_seconds,evidence_available=True)
                 c.execute("UPDATE monitor_evidence_outbox SET payload=? WHERE seq=?",(encode(observation,events),seq))
             if message and cfg.notify:
                 c.execute("INSERT INTO outbox(monitor_id,created,message,next_at) VALUES(?,?,?,?)",(id,now,message[:500],now))
@@ -217,10 +229,16 @@ class MonitorStore:
             row["max_pending"]=self.max_evidence_pending
             return row
 
+    def observatory_snapshot(self,id,since,before):
+        with self.db() as c:
+            c.execute("BEGIN")
+            return observatory_store.snapshot(c,id,since,before)
+
     def prune(self):
         now=self.clock()
         with self.db() as c:
             c.execute("DELETE FROM observations WHERE at<?",(now-30*86400,))
+            c.execute("DELETE FROM observatory_journal WHERE at<?",(now-30*86400,))
             c.execute("DELETE FROM incidents WHERE closed IS NOT NULL AND closed<?",(now-180*86400,))
             c.execute("UPDATE outbox SET state='failed' WHERE state='pending' AND created<?",(now-7*86400,))
             c.execute("DELETE FROM outbox WHERE state IN ('sent','failed') AND created<?",(now-30*86400,))

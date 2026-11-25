@@ -72,7 +72,7 @@ class Tests(unittest.TestCase):
                 m.finish(id,{"outcome":"healthy","latency_ms":10 if i<12 else 50,"details":{"ip":"127.0.0.1"}})
                 d.once("monitor-v1");now[0]+=60
             rows,usage=e.observatory_rows(id,since=1000,before=now[0])
-            self.assertEqual(usage["rows"],14)
+            self.assertEqual(usage["rows"],15)
             self.assertEqual(len(rows),14)
             result=report(rows,m.get(id),now[0])
             self.assertEqual(result["signals"][0]["type"],"anomaly.detected")

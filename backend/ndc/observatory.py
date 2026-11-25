@@ -1,6 +1,6 @@
-"""Read-only, bounded monitor latency analysis.
+"""Bounded monitor latency analysis and shared transition rule.
 
-Signals are reconstructed from retained evidence, not durable incident transitions.
+Window reconstruction is distinct from persisted live transitions.
 Never infer uptime or historical maintenance from missing checks.
 """
 from collections import Counter,deque
@@ -24,79 +24,75 @@ def comparable(r):
         return None
     return (r["target_id"],r["profile_revision"],r["family"],r["protocol"],r["probe_kind"])
 
-def analyze(rows,monitor,*,since,before,now):
-    if len(rows)>MAX_ROWS: raise NarrowQuery("Narrow observatory window")
-    interval=monitor["config"]["interval_seconds"]
-    # Fixed-delay scheduling and a shared execution lane: a gap is unobserved,
-    # not a count of failed scheduled checks.
-    gap_threshold=3*interval
-    baseline=deque(maxlen=BASELINE_SIZE)
-    counts=Counter()
+def initial_state():
+    return {"rule_version":VERSION,"baseline":[],"prev":None,"identity":None,"bad":0,"good":0,
+        "active":False,"state":"learning"}
+
+def advance(state,r,interval,evidence_id=None):
+    """Same pure transition for live persisted state and window reconstruction."""
+    if state["rule_version"]!=VERSION:
+        raise ValueError("Unsupported observatory state rule")
+    baseline=deque(state["baseline"],maxlen=BASELINE_SIZE)
+    prev=state["prev"];identity=state["identity"];bad=state["bad"];good=state["good"];active=state["active"]
+    at=r["observed_at"];outcome=r["outcome"];latency=value(metrics(r),"latency","ms")
+    current=comparable(r)
+    current=list(current) if current is not None else None
     signals=[]
-    points=[]
-    prev=None;identity=None;bad=good=0;active=False
-    def interrupt(reason,at):
+    def interrupt(reason):
         nonlocal bad,good,active
         if active:
             signals.append({"type":"anomaly.interrupted","at":at,"reason":reason,"evidence_id":None})
         baseline.clear();bad=good=0;active=False
+    gap=prev is not None and (at-prev>3*interval or at<=prev)
+    if gap: interrupt("observation_gap_or_clock_discontinuity")
+    if identity is not None and current!=identity: interrupt("comparison_identity_changed")
+    while baseline and at-baseline[0][0]>BASELINE_AGE: baseline.popleft()
+    center=mad=threshold=None
+    if outcome not in ("success","partial") or current is None or latency is None:
+        interrupt("noncomparable_or_missing_latency")
+        status="unavailable" if outcome=="failure" else "unknown"
+    elif len(baseline)<MIN_BASELINE:
+        if active: interrupt("baseline_expired")
+        bad=good=0;status="learning"
+        if outcome=="success": baseline.append((at,latency))
+    else:
+        center=median(v for _,v in baseline);mad=median(abs(v-center) for _,v in baseline)
+        threshold=center+max(5.0,.5*center,6*1.4826*mad)
+        if latency>threshold:
+            bad=min(CONFIRM,bad+1);good=0
+            if bad>=CONFIRM and not active:
+                active=True;signals.append({"type":"anomaly.detected","at":at,"reason":"consecutive_high_latency","evidence_id":evidence_id})
+            status="anomaly" if active else "candidate"
+        elif active:
+            bad=0;good=good+1 if outcome=="success" else 0
+            status="recovering" if good else "anomaly"
+            if good>=CONFIRM:
+                active=False;good=0;status="normal"
+                signals.append({"type":"anomaly.recovered","at":at,"reason":"consecutive_healthy_latency","evidence_id":evidence_id})
+                baseline.append((at,latency))
+        else:
+            bad=good=0;status="normal" if outcome=="success" else "degraded"
+            if outcome=="success": baseline.append((at,latency))
+    next_state={"rule_version":VERSION,"baseline":list(baseline),"prev":at,"identity":current,
+        "bad":bad,"good":good,"active":active,"state":status}
+    point={"at":at,"evidence_id":evidence_id,"outcome":outcome,"latency_ms":latency,"baseline_ms":center,
+        "mad_ms":mad,"threshold_ms":threshold,"baseline_samples":len(baseline),"state":status,"gap_before":gap}
+    return next_state,point,signals
 
+def analyze(rows,monitor,*,since,before,now):
+    if len(rows)>MAX_ROWS: raise NarrowQuery("Narrow observatory window")
+    interval=monitor["config"]["interval_seconds"]
+    gap_threshold=3*interval
+    counts=Counter();signals=[];points=[];state=initial_state()
     for item in rows:
         r=item["record"]
         if r["source_id"]!=monitor["id"] or r["source_kind"]!="monitor":
             continue
         at=r["observed_at"]
-        if at is None or not since<=at<before:
-            continue
-        outcome=r["outcome"]
-        counts[outcome]+=1
-        latency=value(metrics(r),"latency","ms")
-        current=comparable(r)
-        gap=prev is not None and (at-prev>gap_threshold or at<=prev)
-        if gap:
-            interrupt("observation_gap_or_clock_discontinuity",at)
-        if identity is not None and current!=identity:
-            interrupt("comparison_identity_changed",at)
-        identity=current
-        prev=at
-        while baseline and at-baseline[0][0]>BASELINE_AGE:
-            baseline.popleft()
-        center=mad=threshold=None
-        state="unknown"
-        if outcome not in ("success","partial") or current is None or latency is None:
-            interrupt("noncomparable_or_missing_latency",at)
-            state="unavailable" if outcome=="failure" else "unknown"
-        else:
-            # Baseline only admits healthy, non-anomalous checks. Freeze during
-            # candidate/active anomaly and recovery; never train on degradation.
-            if len(baseline)>=MIN_BASELINE:
-                center=median(v for _,v in baseline)
-                mad=median(abs(v-center) for _,v in baseline)
-                threshold=center+max(5.0,.5*center,6*1.4826*mad)
-                if latency>threshold:
-                    bad+=1;good=0
-                    if bad>=CONFIRM and not active:
-                        active=True
-                        signals.append({"type":"anomaly.detected","at":at,"reason":"consecutive_high_latency","evidence_id":item["id"]})
-                    state="anomaly" if active else "candidate"
-                elif active:
-                    bad=0;good=good+1 if outcome=="success" else 0
-                    state="recovering" if good else "anomaly"
-                    if good>=CONFIRM:
-                        active=False;good=0;state="normal"
-                        signals.append({"type":"anomaly.recovered","at":at,"reason":"consecutive_healthy_latency","evidence_id":item["id"]})
-                        baseline.append((at,latency))
-                else:
-                    bad=good=0;state="normal" if outcome=="success" else "degraded"
-                    if outcome=="success": baseline.append((at,latency))
-            else:
-                # Expiration during an active anomaly cannot imply recovery.
-                if active: interrupt("baseline_expired",at)
-                bad=good=0;state="learning"
-                if outcome=="success": baseline.append((at,latency))
-        points.append({"at":at,"received_at":item["received_at"],"evidence_id":item["id"],"outcome":outcome,
-            "latency_ms":latency,"baseline_ms":center,"mad_ms":mad,"threshold_ms":threshold,
-            "baseline_samples":len(baseline),"state":state,"gap_before":gap})
+        if at is None or not since<=at<before: continue
+        counts[r["outcome"]]+=1
+        state,point,transitions=advance(state,r,interval,item["id"])
+        points.append(point|{"received_at":item["received_at"]});signals.extend(transitions)
     known=sum(counts[k] for k in ("success","partial","failure"))
     total=len(points)
     last=points[-1] if points else None
