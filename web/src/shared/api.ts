@@ -1,15 +1,17 @@
-export type Mode = 'cold' | 'warm'
+export type Mode = 'cold' | 'warm' | 'both'
 export type Family = 'ipv4' | 'ipv6' | 'auto'
 export interface Result {
   endpoint: string; ip?: string | null; mode?: Mode; family?: Family;
   ok: number; count: number; mean: number | null; p50: number | null;
   p95: number | null; p99: number | null; jitter: number | null;
-  error?: string; errors?: Record<string, number>; engine?: string; protocols?: string[]; peer_ips?: string[]; reuse?: {yes:number;no:number;unknown:number}; warmup_error?: string | null; requested_count?:number
+  error?: string; errors?: Record<string, number>; engine?: string; protocols?: string[]; peer_ips?: string[]; reuse?: {yes:number;no:number;unknown:number}; warmup_error?: string | null; requested_count?:number; bootstrap_ms?:number; bootstrap_error?:string|null
 }
 export interface Run { endpoints: string[]; count: number; mode: Mode; family: Family; parallel: number }
 export interface Profile { id: string; name: string; config: Run }
 export interface Status { running: boolean; run_id?: string; state?: string; results: Result[]; done: number; total: number; error?: string }
-export interface History { time: number; results: Result[] }
+export interface History { time: number; run_id?:string; results: Result[] }
+export interface Sample {endpoint:string;mode:Mode;domain:string;ok:boolean;duration_ms:number|null;connect_ms:number|null;handshake_ms:number|null;protocol:string|null;reused:boolean|null;rcode:string|null;error:string|null}
+export interface SamplePage {total:number;offset:number;items:Sample[]}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -31,6 +33,7 @@ export const api = {
   logout: () => request<Session>('/api/auth/logout',{method:'POST'}),
   defaults: () => request<string[]>('/api/defaults'),
   status: () => request<Status>('/api/status'),
+  samples: (id:string,offset:number) => request<SamplePage>('/api/v1/runs/'+encodeURIComponent(id)+'/samples?offset='+offset+'&limit=200'),
   history: () => request<History[]>('/api/history'),
   profiles: () => request<Profile[]>('/api/v1/profiles'),
   saveProfile: (name: string, config: Run) => request<Profile>('/api/v1/profiles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,config})}),
