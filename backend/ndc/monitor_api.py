@@ -27,7 +27,10 @@ def create(request:Request,body:MonitorConfig):
 
 @router.patch("/monitors/{id}")
 def enable(request:Request,id:str,body:Enable):
-    result=store(request).enable(id,body.enabled)
+    try:
+        result=store(request).enable(id,body.enabled)
+    except MonitorBusy as exc:
+        raise HTTPException(409,str(exc))
     if result is None:
         raise HTTPException(404,"Monitor not found")
     return result
