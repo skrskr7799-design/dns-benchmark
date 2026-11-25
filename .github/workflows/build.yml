@@ -59,6 +59,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules
         run: docker exec -i benchmark python - < tests/test_diagnostics.py
+      - name: Integration fixtures
+        run: docker exec -i benchmark python - < tests/test_integrations.py
       - name: Browser smoke
         working-directory: web
         run: |
@@ -70,11 +72,13 @@ jobs:
         if: failure()
         run: docker logs benchmark || true
       - name: Publish image
-        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark' || github.ref == 'refs/heads/work/dns-03-inspector' || github.ref == 'refs/heads/work/net-01-connectivity' || github.ref == 'refs/heads/work/net-02-routes' || github.ref == 'refs/heads/work/mon-01-monitoring' || github.ref == 'refs/heads/work/dist-01-agents' || github.ref == 'refs/heads/work/dist-02-dashboard' || github.ref == 'refs/heads/work/diag-01-diagnostics')
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark' || github.ref == 'refs/heads/work/dns-03-inspector' || github.ref == 'refs/heads/work/net-01-connectivity' || github.ref == 'refs/heads/work/net-02-routes' || github.ref == 'refs/heads/work/mon-01-monitoring' || github.ref == 'refs/heads/work/dist-01-agents' || github.ref == 'refs/heads/work/dist-02-dashboard' || github.ref == 'refs/heads/work/diag-01-diagnostics' || github.ref == 'refs/heads/work/int-01-integrations')
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TAG=edge
+          elif [ "${{ github.ref }}" = "refs/heads/work/int-01-integrations" ]; then
+            TAG=preview-int-01
           elif [ "${{ github.ref }}" = "refs/heads/work/diag-01-diagnostics" ]; then
             TAG=preview-diag-01
           elif [ "${{ github.ref }}" = "refs/heads/work/dist-02-dashboard" ]; then
