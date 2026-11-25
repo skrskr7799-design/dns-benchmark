@@ -1,7 +1,8 @@
+import {useState} from 'react'
 import {createRoot} from 'react-dom/client'
-import {QueryClient,QueryClientProvider,useQuery} from '@tanstack/react-query'
+import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import {createRootRoute,createRoute,createRouter,createHashHistory,RouterProvider,Outlet,Link} from '@tanstack/react-router'
-import {Benchmark,useStatus} from './features/benchmark'
+import {Benchmark} from './features/benchmark'
 import {Inspector} from './features/inspector'
 import {Connectivity,TLSInspector} from './features/network'
 import {Routes} from './features/routes'
@@ -10,14 +11,20 @@ import {Agents} from './features/agents'
 import {Diagnostics} from './features/diagnostics'
 import {Integrations} from './features/integrations'
 import {History} from './features/history'
-import {Stats} from './shared/results'
-import {api} from './shared/api'
+import {Overview} from './features/overview'
+import {Brand,Icon,Circuit} from './shared/identity'
 import {AuthGate,Logout} from './features/auth'
 import './style.css'
 const client=new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:true}}})
-const planned=['Settings']
-function Shell(){return <div className="shell"><aside><div className="brand"><span className="logo">N</span><div><b>NETWORK</b><small>DIAGNOSTICS</small></div></div><div className="nav-title">WORKSPACE</div><nav aria-label="Навигация"><Link to="/" activeOptions={{exact:true}}>Overview</Link><Link to="/benchmark">DNS Benchmark</Link><Link to="/inspector">DNS Inspector</Link><Link to="/connectivity">Connectivity</Link><Link to="/tls">TLS Inspector</Link><Link to="/routes">Routes</Link><Link to="/monitoring">Monitoring</Link><Link to="/agents">Agents</Link><Link to="/diagnostics">Smart Diagnostics</Link><Link to="/integrations">Integrations</Link><Link to="/history">История</Link>{planned.map(n=><span className="planned" key={n}>{n}<small>План</small></span>)}</nav><div className="instance"><span className="dot"/> Standalone · alpha <Logout/></div></aside><main><Outlet/></main></div>}
-function Overview(){const status=useStatus(), history=useQuery({queryKey:['history'],queryFn:api.history});return <><header className="page-heading"><div><div className="eyebrow">WORKSPACE / OVERVIEW</div><h1>Network overview</h1><p>Локальная сетевая диагностика</p></div><Link className="primary-link" to="/benchmark">Новый тест</Link></header><Stats rows={status.data?.results.length?status.data.results:history.data?.[0]?.results??[]}/><section className="panel"><h2>Состояние приложения</h2><p>{status.isPending?'Подключение к API…':status.isError?'API недоступен':status.data?.running?'Бенчмарк выполняется':'API доступен · нет активного теста'}</p><p className="muted">Метрики относятся к текущему или последнему сохранённому запуску, а не непрерывному мониторингу.</p></section><section className="panel"><div className="section-title"><h2>Последние запуски</h2><Link to="/history">Вся история</Link></div>{history.isError?<p role="alert">Не удалось загрузить историю</p>:history.isPending?<p>Загрузка…</p>:history.data?.length?history.data.slice(0,5).map((r,i)=><div className="history-row" key={i}><span>{new Date(r.time*1000).toLocaleString('ru-RU')}</span><small>{r.results.length} серверов</small></div>):<p className="empty">Нет сохранённых запусков.</p>}</section></>}
+const navGroups=[
+ {title:'WORKSPACE',items:[['/','Overview','overview'],['/benchmark','DNS Benchmark','benchmark'],['/inspector','DNS Inspector','search'],['/connectivity','Connectivity','route'],['/tls','TLS Inspector','lock'],['/routes','Routes','route'],['/diagnostics','Smart Diagnostics','activity']]},
+ {title:'MONITORING',items:[['/monitoring','Monitoring','activity'],['/history','История','history'],['/agents','Agents','agents']]},
+ {title:'SYSTEM',items:[['/integrations','Integrations','integrations']]}
+] as const
+function Shell(){
+ const [open,setOpen]=useState(false)
+ return <div className="shell"><aside className={open?'sidebar nav-open':'sidebar'}><div className="sidebar-top"><Brand/><button className="secondary mobile-menu" aria-label={open?'Закрыть меню':'Открыть меню'} aria-expanded={open} aria-controls="workspace-nav" onClick={()=>setOpen(v=>!v)}><Icon name={open?'close':'menu'}/></button></div><nav id="workspace-nav" aria-label="Навигация">{navGroups.map(g=><div className="nav-group" key={g.title}><div className="nav-title">{g.title}</div>{g.items.map(([to,label,icon])=><Link key={to} to={to} activeOptions={{exact:true}} onClick={()=>setOpen(false)}><Icon name={icon}/><span>{label}</span></Link>)}</div>)}</nav><div className="instance"><div className="instance-label"><Icon name="agents"/><div><b>Local instance</b><small>Obsidian Signature</small></div></div><Logout/></div></aside><main><Circuit/><div className="workspace-content"><Outlet/></div></main></div>
+}
 const rootRoute=createRootRoute({component:Shell})
 const indexRoute=createRoute({getParentRoute:()=>rootRoute,path:'/',component:Overview})
 const benchmarkRoute=createRoute({getParentRoute:()=>rootRoute,path:'/benchmark',component:Benchmark})

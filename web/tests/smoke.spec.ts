@@ -9,6 +9,7 @@ test('real API and responsive shell',async({page})=>{
  await expect(page.getByRole('button',{name:'Запустить тест'})).toBeEnabled()
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+ await page.getByRole('button',{name:'Открыть меню'}).click()
  await page.getByRole('link',{name:'История',exact:true}).click()
  await expect(page.getByRole('heading',{name:'История'})).toBeVisible()
  await expect(page.getByText('История пока пуста.')).toBeVisible()
