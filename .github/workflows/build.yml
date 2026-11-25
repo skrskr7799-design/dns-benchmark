@@ -27,6 +27,9 @@ jobs:
           if [ ! -f package-lock.json ]; then npm install --package-lock-only; fi
           npm ci
           npm run build
+          echo 'NDC_FRONTEND_LOCK_BEGIN'
+          node -e 'console.log(JSON.stringify(require("./package-lock.json")))'
+          echo 'NDC_FRONTEND_LOCK_END'
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-lockfile
@@ -43,12 +46,18 @@ jobs:
       - run: docker build -t dns-benchmark:test .
       - name: Python dependency audit
         run: |
-          docker run --rm --user root --entrypoint sh dns-benchmark:test -c 'pip install --no-cache-dir pip-audit && pip-audit --format json' > python-audit.log 2>&1 || true
+          docker run --rm --entrypoint python dns-benchmark:test -m pip freeze --all > runtime-versions.txt
+          cat runtime-versions.txt
+          docker run --rm --user root --entrypoint sh dns-benchmark:test -c 'python -m venv /tmp/auditor && /tmp/auditor/bin/pip install --no-cache-dir pip-audit==2.10.1 >&2 && /tmp/auditor/bin/pip-audit --path /usr/local/lib/python3.12/site-packages --format json' > python-audit.log || audit_status=$?
           cat python-audit.log
+          python -c 'import json; r=json.load(open("python-audit.log")); assert isinstance(r["dependencies"],list)'
+          test "${audit_status:-0}" -le 1
       - uses: actions/upload-artifact@v4
         with:
           name: python-audit
-          path: python-audit.log
+          path: |
+            python-audit.log
+            runtime-versions.txt
       - name: Start test container
         run: |
           docker run -d --name benchmark -e NDC_OWNER_PASSWORD="$NDC_TEST_PASSWORD" -e NDC_SECURE_COOKIE=0 -e NDC_ALLOWED_CIDRS=127.0.0.1/32 -p 127.0.0.1:8080:8080 dns-benchmark:test
@@ -90,6 +99,10 @@ jobs:
       - name: Container logs
         if: failure()
         run: docker logs benchmark || true
+      - name: Dependency security gate
+        run: |
+          node -e 'const r=require("./web/audit.json"); if(!r.metadata || r.metadata.vulnerabilities.total!==0) process.exit(1)'
+          python -c 'import json,sys; r=json.load(open("python-audit.log")); sys.exit(any(d.get("vulns") or d.get("skip_reason") for d in r["dependencies"]))'
       - name: Publish image
         if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/work/fnd-01-react' || github.ref == 'refs/heads/work/fnd-02-backend' || github.ref == 'refs/heads/work/fnd-03-security' || github.ref == 'refs/heads/work/dns-01-engine' || github.ref == 'refs/heads/work/dns-02-benchmark' || github.ref == 'refs/heads/work/dns-03-inspector' || github.ref == 'refs/heads/work/net-01-connectivity' || github.ref == 'refs/heads/work/net-02-routes' || github.ref == 'refs/heads/work/mon-01-monitoring' || github.ref == 'refs/heads/work/dist-01-agents' || github.ref == 'refs/heads/work/dist-02-dashboard' || github.ref == 'refs/heads/work/diag-01-diagnostics' || github.ref == 'refs/heads/work/int-01-integrations' || github.ref == 'refs/heads/work/rel-01-release')
         run: |

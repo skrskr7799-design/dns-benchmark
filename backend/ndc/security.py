@@ -115,7 +115,14 @@ async def bounded_body(request):
     return None
 
 async def guard(request,call_next):
-    path=request.url.path
+    path=request.scope.get("path","")
+    hosts=request.headers.getlist("host")
+    if not path.startswith("/") or len(hosts)!=1 or not re.fullmatch(r"(?:[A-Za-z0-9.-]+|\[[0-9a-fA-F:.]+\])(?::[0-9]{1,5})?",hosts[0]):
+        return JSONResponse({"detail":"Invalid request target or Host"},400)
+    if request.method not in ("GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"):
+        return JSONResponse({"detail":"Unsupported HTTP method"},405)
+    if not path.startswith("/api/") and request.headers.get("range"):
+        return JSONResponse({"detail":"Range requests unsupported"},416)
     if not path.startswith("/api/"):
         response=await call_next(request)
         response.headers["X-Content-Type-Options"]="nosniff"

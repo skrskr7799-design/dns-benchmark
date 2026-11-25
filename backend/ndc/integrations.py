@@ -7,7 +7,7 @@ import stat
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
-import httpx
+import httpx2 as httpx
 import dns.query
 from .scope import validate_ip
 from .models import NetworkTarget, Connectivity

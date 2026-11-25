@@ -1,4 +1,5 @@
-import time, statistics, math, socket, ssl, httpx
+import time, statistics, math, socket, ssl
+import httpx2 as httpx
 from urllib.parse import urlsplit
 from contextlib import ExitStack
 from collections import Counter
