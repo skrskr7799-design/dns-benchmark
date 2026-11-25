@@ -37,7 +37,7 @@ def legacy_status(request: Request):
         return {"running":False,"results":[],"done":0,"total":0}
     job=get_job(store,job_id)
     return {"running":job["status"] not in TERMINAL,"run_id":job_id,"state":job["status"],
-            "results":job["results"],"done":job["done"],"total":job["total"],"error":job["error"]}
+            "results":job["results"],"revision":job["revision"],"done":job["done"],"total":job["total"],"error":job["error"]}
 
 @router.get("/api/history")
 def legacy_history(request: Request):
