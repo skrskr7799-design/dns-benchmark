@@ -318,6 +318,21 @@ for path in ("adguard","throughput"):
     expect_error(urllib.request.Request(base+"/api/v1/integrations/"+path,data=b'{}',headers={"Content-Type":"application/json","X-CSRF-Token":csrf}),409)
 print("Opt-in integration API smoke passed")
 
+# Explicit deletion of terminal jobs and body budget.
+id=request("/api/v1/runs",{"endpoints":["udp://127.0.0.1:9"],"count":1})["id"]
+request("/api/v1/runs/"+id+"/cancel",{})
+for _ in range(100):
+    state=request("/api/v1/runs/"+id)["status"]
+    if state in ("completed","cancelled","failed","interrupted"):
+        break
+    time.sleep(.1)
+req=urllib.request.Request(base+"/api/v1/runs/"+id,method="DELETE",headers={"X-CSRF-Token":csrf})
+with opener.open(req,timeout=10) as response:
+    assert response.status==204
+expect_error(urllib.request.Request(base+"/api/v1/runs/"+id),404)
+expect_error(urllib.request.Request(base+"/api/v1/runs",data=b"x"*131073,headers={"Content-Type":"application/json","X-CSRF-Token":csrf}),413)
+print("Release deletion and request size smoke passed")
+
 logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-Token":csrf})
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
