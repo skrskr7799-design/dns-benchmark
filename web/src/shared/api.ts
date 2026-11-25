@@ -50,6 +50,7 @@ export interface DiagnosticReport {rule_version:string;host:string;port:number;k
 export interface IntegrationStatus {adguard_configured:boolean;throughput_configured:boolean}
 export interface AdGuardSnapshot {configured:boolean;errors:Record<string,string>;at:number;version:string|null;protection_enabled:boolean|null;running:boolean|null;queries:number|null;blocked:number|null;mean_ms:number|null;upstreams:string[];upstreams_omitted:number|null;upstream_timings:{upstream:string;mean_ms:number}[];time_units:string|null}
 export interface ThroughputReport {bytes:number;duration_ms:number;mbps:number|null;reason:string;body_started:boolean;byte_limit:number;vantage:string;method:string}
+export interface RunIndex {id:string;status:string;created:number;finished:number|null;error:string|null;revision:number}
 export interface Session { authenticated: boolean; csrf: string | null }
 let csrf: string | null = null
 export function setSession(session: Session) { csrf=session.csrf }
@@ -66,6 +67,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 export const api = {
+  runs:(offset:number)=>request<RunIndex[]>('/api/v1/runs?offset='+offset),
+  deleteRun:(id:string)=>request<void>('/api/v1/runs/'+encodeURIComponent(id),{method:'DELETE'}),
   integrations:()=>request<IntegrationStatus>('/api/v1/integrations'),
   adguard:()=>request<AdGuardSnapshot>('/api/v1/integrations/adguard',{method:'POST'}),
   throughput:()=>request<ThroughputReport>('/api/v1/integrations/throughput',{method:'POST'}),
