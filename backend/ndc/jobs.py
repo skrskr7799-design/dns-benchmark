@@ -1,6 +1,6 @@
 import threading
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .storage import ACTIVE
 from .probes.dns import measure, measure_both
 
@@ -86,8 +86,12 @@ class Coordinator:
         try:
             with ThreadPoolExecutor(max_workers=cfg["parallel"]) as pool:
                 futures=[pool.submit(worker) for _ in range(cfg["parallel"])]
-                for f in futures:
-                    f.result()
+                try:
+                    for f in as_completed(futures):
+                        f.result()
+                except Exception:
+                    cancelled.set()
+                    raise
             status="interrupted" if self.stop_event.is_set() else "cancelled" if cancelled.is_set() else "completed"
             self.store.finish(job_id,status)
         except Exception as exc:

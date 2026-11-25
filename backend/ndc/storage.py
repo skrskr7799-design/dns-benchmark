@@ -88,18 +88,22 @@ class Store:
     def claim(self):
         with self.connect() as c:
             c.execute("BEGIN IMMEDIATE")
+            if c.execute("SELECT 1 FROM jobs WHERE status IN ('running','cancelling') LIMIT 1").fetchone():
+                return None
             row = c.execute("SELECT id FROM jobs WHERE status='queued' ORDER BY created,id LIMIT 1").fetchone()
             if not row:
                 return None
             c.execute("UPDATE jobs SET status='running',started=?,revision=revision+1 WHERE id=?", (time.time(),row["id"]))
             return row["id"]
 
-    def get(self, job_id, raw=False):
+    def get(self, job_id, raw=False, since=None):
         with self.connect() as c:
             c.execute("BEGIN")
             r = c.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not r:
                 return None
+            if since is not None and r["revision"]==since:
+                return {"revision":since,"status":r["status"],"unchanged":True}
             job = dict(r)
             job["config"] = json.loads(job["config"])
             job["results"] = [json.loads(x[0]) for x in c.execute("SELECT payload FROM job_results WHERE job_id=? ORDER BY ordinal",(job_id,))]
@@ -123,6 +127,10 @@ class Store:
 
     def add_result(self, job_id, ordinal, result):
         with self.connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row=c.execute("SELECT status FROM jobs WHERE id=?",(job_id,)).fetchone()
+            if row is None or row[0] not in ("running","cancelling"):
+                raise Busy("Cannot append to terminal or missing run")
             c.execute("INSERT INTO job_results(job_id,ordinal,payload) VALUES(?,?,?)",(job_id,ordinal,json.dumps(result)))
             c.execute("UPDATE jobs SET revision=revision+1 WHERE id=?",(job_id,))
 

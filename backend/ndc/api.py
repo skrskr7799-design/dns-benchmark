@@ -1,4 +1,5 @@
 import asyncio
+from anyio import to_thread
 import json
 import csv
 import io
@@ -80,12 +81,12 @@ def cancel_run(request: Request, job_id: str):
 @router.get("/api/v1/runs/{job_id}/events")
 async def events(request: Request, job_id: str):
     store,_=services(request)
-    await asyncio.to_thread(get_job,store,job_id)
+    await to_thread.run_sync(get_job,store,job_id)
     async def stream():
         revision=None
         idle=0
         while not await request.is_disconnected() and request.app.state.security.session(request):
-            job=await asyncio.to_thread(store.get,job_id)
+            job=await to_thread.run_sync(store.get,job_id,False,revision)
             if job is None:
                 return
             if job["revision"]!=revision:

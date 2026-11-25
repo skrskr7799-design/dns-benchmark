@@ -1,7 +1,9 @@
 import threading
+from subprocess import TimeoutExpired
+from .integration_worker import bounded
 import time
 from fastapi import APIRouter, Request, HTTPException
-from .integrations import load,snapshot,throughput
+from .integrations import load
 from .api import inspection_slot
 
 router=APIRouter(prefix="/api/v1/integrations")
@@ -35,10 +37,15 @@ def reserve(name,seconds):
 
 @router.post("/adguard")
 def read_adguard(request:Request):
-    t,_=target(request,"adguard")
+    _,cfg=target(request,"adguard")
     reserve("adguard",15)
     try:
-        return snapshot(t)
+        try:
+            return bounded("adguard",cfg)
+        except TimeoutExpired:
+            raise HTTPException(504,"Integration deadline exceeded")
+        except Exception:
+            raise HTTPException(502,"Integration worker failed")
     finally:
         inspection_slot.release()
 
@@ -50,7 +57,9 @@ def download_test(request:Request):
     reserve("throughput",60)
     try:
         try:
-            return throughput(t,cfg["path"])
+            return bounded("throughput",cfg)
+        except TimeoutExpired:
+            raise HTTPException(504,"Integration deadline exceeded")
         except Exception:
             raise HTTPException(422,"Invalid throughput path")
     finally:

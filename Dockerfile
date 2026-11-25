@@ -8,8 +8,8 @@ RUN npm run build
 
 FROM python:3.12-slim@sha256:191083cdf6c7bda8c76158983163ead5d5cf7b77cf3033e805bb0f5296f51b4b
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir pip==26.2.0 && pip install --no-cache-dir -r requirements.txt && useradd -u 10001 -m app && mkdir /data && chown app:app /data
+COPY requirements.txt requirements.lock.txt ./
+RUN pip install --no-cache-dir pip==26.2.0 && pip install --no-cache-dir -r requirements.txt -c requirements.lock.txt && pip check && useradd -u 10001 -m app && mkdir /data && chown app:app /data
 COPY app.py index.html resolvers.txt ./
 COPY backend ./backend
 COPY --from=frontend /web/dist ./web-dist

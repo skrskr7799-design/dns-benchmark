@@ -24,12 +24,9 @@ jobs:
       - name: Resolve frontend dependencies
         working-directory: web
         run: |
-          if [ ! -f package-lock.json ]; then npm install --package-lock-only; fi
+          test -f package-lock.json
           npm ci
           npm run build
-          echo 'NDC_FRONTEND_LOCK_BEGIN'
-          node -e 'console.log(JSON.stringify(require("./package-lock.json")))'
-          echo 'NDC_FRONTEND_LOCK_END'
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-lockfile
@@ -48,6 +45,7 @@ jobs:
         run: |
           docker run --rm --entrypoint python dns-benchmark:test -m pip freeze --all > runtime-versions.txt
           cat runtime-versions.txt
+          diff -u <(sort -f requirements.lock.txt) <(sort -f runtime-versions.txt)
           docker run --rm --user root --entrypoint sh dns-benchmark:test -c 'python -m venv /tmp/auditor && /tmp/auditor/bin/pip install --no-cache-dir pip-audit==2.10.1 >&2 && /tmp/auditor/bin/pip-audit --path /usr/local/lib/python3.12/site-packages --format json' > python-audit.log || audit_status=$?
           cat python-audit.log
           python -c 'import json; r=json.load(open("python-audit.log")); assert isinstance(r["dependencies"],list)'
@@ -60,7 +58,7 @@ jobs:
             runtime-versions.txt
       - name: Start test container
         run: |
-          docker run -d --name benchmark -e NDC_OWNER_PASSWORD="$NDC_TEST_PASSWORD" -e NDC_SECURE_COOKIE=0 -e NDC_ALLOWED_CIDRS=127.0.0.1/32 -p 127.0.0.1:8080:8080 dns-benchmark:test
+          docker run -d --name benchmark --read-only --tmpfs /tmp:size=64m --memory 768m --pids-limit 128 --cap-drop ALL --security-opt no-new-privileges --tmpfs /data:uid=10001,gid=10001,mode=0700,size=128m -e NDC_OWNER_PASSWORD="$NDC_TEST_PASSWORD" -e NDC_SECURE_COOKIE=0 -e NDC_ALLOWED_CIDRS=127.0.0.1/32 -p 127.0.0.1:8080:8080 dns-benchmark:test
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/health && break; sleep 1; done
           curl -fsS http://127.0.0.1:8080/health
           test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/defaults)" = 401
@@ -89,6 +87,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_integrations.py
       - name: Release backup and storage tests
         run: docker exec -i benchmark python - < tests/test_release.py
+      - name: Concurrency and bounded integration tests
+        run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke
         working-directory: web
         run: |
@@ -96,6 +96,9 @@ jobs:
           npm test
       - name: Deterministic API and legacy history smoke
         run: docker exec -i benchmark python - < tests/api_smoke.py
+      - name: Resource snapshot
+        if: always()
+        run: docker stats --no-stream benchmark || true
       - name: Container logs
         if: failure()
         run: docker logs benchmark || true
