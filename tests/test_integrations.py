@@ -20,6 +20,14 @@ class Fixture(BaseHTTPRequestHandler):
         elif self.path=="/file":
             payload=b"x"*32768
             self.send_response(200);self.send_header("Content-Length",str(len(payload)));self.end_headers();self.wfile.write(payload);return
+        elif self.path=="/large":
+            self.send_response(200);self.send_header("Content-Length",str(MAX_DOWNLOAD+32768));self.end_headers()
+            try:
+                for _ in range((MAX_DOWNLOAD+32768)//32768):
+                    self.wfile.write(b"x"*32768)
+            except OSError:
+                pass
+            return
         elif self.path=="/redirect":
             self.send_response(302);self.send_header("Location","http://169.254.169.254/");self.end_headers();return
         else:
@@ -61,6 +69,10 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(r["bytes"],0)
         self.assertIsNone(r["mbps"])
         self.assertEqual([p for p,_ in Fixture.calls],["/file","/redirect"])
+    def test_byte_cap(self):
+        r=throughput(Target(self.cfg),"/large")
+        self.assertEqual(r["bytes"],MAX_DOWNLOAD,r)
+        self.assertEqual(r["reason"],"byte_limit")
     def test_scope(self):
         for cfg in (self.cfg|{"ip":"169.254.169.254"},self.cfg|{"allow_http":False},self.cfg|{"ip":"1.1.1.1"},self.cfg|{"origin":"http://127.0.0.2"}):
             with self.assertRaises(ValueError):
