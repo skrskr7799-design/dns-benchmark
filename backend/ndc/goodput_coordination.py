@@ -1,11 +1,16 @@
-"""Internal admission only: no listener, offer, transport or public API.
+"""Internal admission and session coordination; no listener or public API.
 
 Every operation shares AgentStore's SQLite transaction and agent reservation.
 The budget counts planned payload, not wire traffic or execution time.
 """
 import math
-from .evidence import canonical,digest
-from .peer_throughput import ThroughputPolicy,ThroughputPlan
+import hashlib
+import ipaddress
+import secrets
+import json
+from .evidence import canonical,digest,Observation,Measurement
+from .agent_evidence import encode
+from .peer_throughput import ThroughputPolicy,ThroughputPlan,ThroughputReport
 
 CLAIM_TTL=45
 WINDOW=60
@@ -35,11 +40,31 @@ CREATE TABLE goodput_clock(singleton INTEGER PRIMARY KEY CHECK(singleton=1),last
 INSERT INTO goodput_clock VALUES(1,0);
 """
 
+SESSION_SCHEMA="""
+ALTER TABLE goodput_requests ADD COLUMN receiver_lease TEXT;
+ALTER TABLE goodput_requests ADD COLUMN source_lease TEXT;
+ALTER TABLE goodput_requests ADD COLUMN receiver_report TEXT;
+ALTER TABLE goodput_requests ADD COLUMN source_report TEXT;
+ALTER TABLE goodput_requests ADD COLUMN quarantine_until REAL NOT NULL DEFAULT 0;
+"""
+PREPARE_SECONDS=20
+READY_SECONDS=15
+QUARANTINE_SECONDS=10
+
+def valid_token(value):
+    return isinstance(value,str) and len(value)==43 and all(ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for ch in value)
+
+def lease_hash(value):
+    from .peer_coordination import PeerConflict
+    if not valid_token(value):raise PeerConflict("Invalid lease")
+    return hashlib.sha256(value.encode("ascii")).hexdigest()
+
 def key(policy):
     return digest(policy.model_dump(mode="json"))
 
 class GoodputCoordination:
     goodput_enabled=False
+    goodput_session_enabled=False
 
     def goodput_gate(self):
         from .peer_coordination import PeerConflict
@@ -56,8 +81,8 @@ class GoodputCoordination:
         return now
 
     def goodput_reserved(self,c,id):
-        return bool(c.execute("""SELECT 1 FROM goodput_requests WHERE finished IS NULL
-            AND (source_id=? OR destination_id=?) LIMIT 1""",(id,id)).fetchone())
+        return bool(c.execute("""SELECT 1 FROM goodput_requests WHERE (finished IS NULL OR quarantine_until>?)
+            AND (source_id=? OR destination_id=?) LIMIT 1""",(self.clock(),id,id)).fetchone())
 
     def goodput_expire(self,c,now):
         # Do not delete history or reset admission budget on clock rollback.
@@ -70,11 +95,13 @@ class GoodputCoordination:
             WHERE finished IS NULL AND deadline<=?""",(now,now))
         c.execute("DELETE FROM goodput_requests WHERE finished IS NOT NULL AND finished<?",(now-RETENTION,))
         c.execute("DELETE FROM goodput_claims WHERE reported_at<=? OR reported_at>?",(now-CLAIM_TTL,now))
+        self.goodput_prune_handoffs(c,now)
 
     def goodput_invalidate(self,c,id):
         c.execute("DELETE FROM goodput_claims WHERE agent_id=?",(id,))
         c.execute("""UPDATE goodput_requests SET state='cancelled',finished=max(created,?)
             WHERE finished IS NULL AND (source_id=? OR destination_id=?)""",(self.clock(),id,id))
+        self.goodput_prune_handoffs(c,self.clock())
 
     def goodput_report_claims(self,credential,policies):
         from .peer_coordination import PeerConflict
@@ -94,6 +121,7 @@ class GoodputCoordination:
                     c.execute("UPDATE goodput_requests SET state='cancelled',finished=? WHERE id=?",(now,r["id"]))
             c.execute("DELETE FROM goodput_claims WHERE agent_id=?",(id,))
             c.executemany("INSERT INTO goodput_claims VALUES(?,?,?)",[(id,k,now) for k in keys])
+            self.goodput_prune_handoffs(c,now)
 
     def goodput_fresh(self,c,policy,now):
         d=policy.direction
@@ -119,7 +147,7 @@ class GoodputCoordination:
             if not self.goodput_fresh(c,p.policy,now):raise PeerConflict("Fresh matching goodput claims required")
             if c.execute("SELECT count(*) FROM goodput_requests").fetchone()[0]>=MAX_HISTORY:
                 raise PeerConflict("Goodput history capacity")
-            if c.execute("SELECT count(*) FROM goodput_requests WHERE finished IS NULL").fetchone()[0]>=MAX_GLOBAL_PENDING:
+            if c.execute("SELECT count(*) FROM goodput_requests WHERE finished IS NULL OR quarantine_until>?",(now,)).fetchone()[0]>=MAX_GLOBAL_PENDING:
                 raise PeerConflict("Global goodput pending capacity")
             n,b=c.execute("SELECT count(*),coalesce(sum(byte_count),0) FROM goodput_requests WHERE created>?",(now-WINDOW,)).fetchone()
             if n>=MAX_GLOBAL_ADMISSIONS or b+count>MAX_GLOBAL_BYTES:raise PeerConflict("Global goodput budget")
@@ -137,4 +165,157 @@ class GoodputCoordination:
         self.goodput_gate()
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE");now=self.goodput_now(c);self.expire(c)
-            return bool(c.execute("UPDATE goodput_requests SET state='cancelled',finished=? WHERE id=? AND finished IS NULL",(now,id)).rowcount)
+            changed=bool(c.execute("UPDATE goodput_requests SET state='cancelled',finished=? WHERE id=? AND finished IS NULL",(now,id)).rowcount)
+            self.goodput_handoffs.pop(id,None)
+            return changed
+
+
+    def goodput_prune_handoffs(self,c,now):
+        for id in tuple(self.goodput_handoffs):
+            if not c.execute("SELECT 1 FROM goodput_requests WHERE id=? AND state='ready' AND finished IS NULL AND deadline>?",(id,now)).fetchone():
+                self.goodput_handoffs.pop(id,None)
+
+    def goodput_session_gate(self):
+        from .peer_coordination import PeerConflict
+        self.goodput_gate()
+        if not self.goodput_session_enabled:raise PeerConflict("Goodput sessions disabled")
+
+    def goodput_row(self,c,id):
+        from .peer_coordination import PeerConflict
+        r=c.execute("SELECT * FROM goodput_requests WHERE id=?",(id,)).fetchone()
+        if r is None:raise PeerConflict("Goodput request not found")
+        return r
+
+    def goodput_active(self,c,r,state,now):
+        from .peer_coordination import PeerConflict
+        if r["state"]!=state or r["finished"] is not None or not r["created"]<=now<r["deadline"]:
+            raise PeerConflict("Goodput request not active")
+        p=ThroughputPlan.model_validate_json(r["plan"])
+        if not self.goodput_fresh(c,p.policy,now):raise PeerConflict("Goodput claim stale")
+        return p
+
+    def goodput_offer(self,credential):
+        self.goodput_session_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential)
+            now=self.goodput_now(c);self.expire(c)
+            r=c.execute("""SELECT * FROM goodput_requests WHERE finished IS NULL AND
+                ((destination_id=? AND state='queued') OR (source_id=? AND state='ready'))""",(agent,agent)).fetchone()
+            if r is None:return {"offer":None}
+            p=ThroughputPlan.model_validate_json(r["plan"])
+            if not self.goodput_fresh(c,p.policy,now):return {"offer":None}
+            return {"offer":{"id":r["id"],"role":"receiver" if r["destination_id"]==agent else "source"}}
+
+    def goodput_prepare(self,credential,id):
+        from .peer_coordination import PeerConflict
+        self.goodput_session_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential)
+            now=self.goodput_now(c);self.expire(c);r=self.goodput_row(c,id)
+            if r["destination_id"]!=agent:raise PeerConflict("Wrong receiver")
+            p=self.goodput_active(c,r,"queued",now)
+            lease=secrets.token_urlsafe(32);until=min(r["deadline"],now+PREPARE_SECONDS)
+            c.execute("""UPDATE goodput_requests SET state='preparing',receiver_lease=?,deadline=?,quarantine_until=?
+                WHERE id=?""",(lease_hash(lease),until,until+QUARANTINE_SECONDS,id))
+            return {"plan":p.model_dump(mode="json"),"lease":lease,"deadline":until}
+
+    def goodput_ready(self,credential,id,lease,grant):
+        from .peer_coordination import PeerConflict
+        self.goodput_session_gate()
+        if not valid_token(grant):raise PeerConflict("Invalid grant")
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential)
+            now=self.goodput_now(c);self.expire(c);r=self.goodput_row(c,id)
+            if r["destination_id"]!=agent or r["receiver_lease"]!=lease_hash(lease):
+                raise PeerConflict("Wrong receiver lease")
+            self.goodput_active(c,r,"preparing",now)
+            until=min(r["deadline"],now+READY_SECONDS)
+            c.execute("UPDATE goodput_requests SET state='ready',deadline=? WHERE id=?",(until,id))
+            self.goodput_handoffs[id]=grant
+            return {"deadline":until}
+
+    def goodput_start(self,credential,id):
+        from .peer_coordination import PeerConflict
+        self.goodput_session_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential)
+            now=self.goodput_now(c);self.expire(c);r=self.goodput_row(c,id)
+            if r["source_id"]!=agent:raise PeerConflict("Wrong source")
+            p=self.goodput_active(c,r,"ready",now)
+            grant=self.goodput_handoffs.pop(id,None)
+            if grant is None:
+                c.execute("UPDATE goodput_requests SET state='interrupted',finished=? WHERE id=?",(now,id))
+                return {"state":"interrupted"}
+            lease=secrets.token_urlsafe(32)
+            c.execute("UPDATE goodput_requests SET state='running',source_lease=? WHERE id=?",(lease_hash(lease),id))
+            return {"plan":p.model_dump(mode="json"),"lease":lease,"grant":grant,"deadline":r["deadline"]}
+
+    def goodput_role(self,r,agent,lease):
+        from .peer_coordination import PeerConflict
+        role="receiver" if r["destination_id"]==agent else "source" if r["source_id"]==agent else None
+        if role is None or r[role+"_lease"]!=lease_hash(lease):raise PeerConflict("Wrong goodput lease")
+        return role
+
+    def goodput_status(self,credential,id,lease):
+        self.goodput_session_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential)
+            now=self.goodput_now(c);self.expire(c);r=self.goodput_row(c,id)
+            self.goodput_role(r,agent,lease)
+            p=ThroughputPlan.model_validate_json(r["plan"])
+            active=(r["finished"] is None and r["state"] in ("preparing","ready","running")
+                and r["created"]<=now<r["deadline"] and self.goodput_fresh(c,p.policy,now))
+            return {"active":active,"state":r["state"]}
+
+    def goodput_finish(self,credential,id,lease,report):
+        from .peer_coordination import PeerConflict
+        self.goodput_session_gate()
+        report=ThroughputReport.model_validate(report.model_dump(mode="json"))
+        value=canonical(report.model_dump(mode="json"))
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential)
+            now=self.goodput_now(c);self.expire(c);r=self.goodput_row(c,id)
+            role=self.goodput_role(r,agent,lease);column=role+"_report"
+            if r[column] is not None:
+                if r[column]!=value:raise PeerConflict("Conflicting goodput result replay")
+                return {"duplicate":True,"state":r["state"]}
+            p=self.goodput_active(c,r,"running",now)
+            if report.plan!=p:raise PeerConflict("Goodput plan mismatch")
+            c.execute("UPDATE goodput_requests SET "+column+"=? WHERE id=?",(value,id))
+            r=self.goodput_row(c,id)
+            if r["source_report"] is None or r["receiver_report"] is None:
+                return {"duplicate":False,"state":"running"}
+            matched=r["source_report"]==r["receiver_report"]
+            d=p.direction;summary=report.summary()
+            metrics=(Measurement(name="offered_rate",unit="bit/s",value=float(p.policy.rate_bps)),
+                Measurement(name="received_bytes",unit="bytes",value=float(report.received_bytes) if matched else None),
+                Measurement(name="receiver_elapsed",unit="ms",value=report.receiver_elapsed_us/1000 if matched else None),
+                Measurement(name="application_goodput",unit="bit/s",value=summary["application_goodput_bps"] if matched else None))
+            record=Observation(source_kind="agent",source_id=id,source_revision=1,source_part="peer-goodput-v1",
+                run_id=id,vantage_id="agent:"+d.source_agent_id,observed_at=None,
+                target_id=digest(d.model_dump(mode="json")),profile_revision=key(p.policy),
+                probe_kind="throughput",outcome="success" if matched else "unknown",provenance="agent_claim",
+                measurements=metrics,protocol="tcp",family="ipv4" if ipaddress.ip_address(d.destination_ip).version==4 else "ipv6",
+                error_code=None if matched else "peer_result_inconsistent",
+                limitations=("agent_claim_not_attested","remote_observation_time_unavailable","paced_application_goodput",
+                    "no_link_capacity_inference","wire_overhead_not_measured"))
+            if c.execute("SELECT count(*) FROM agent_evidence_outbox").fetchone()[0]>=self.max_evidence_pending:
+                c.execute("""UPDATE agent_evidence_coverage SET dropped_tasks=dropped_tasks+1,
+                    dropped_observations=dropped_observations+1,first_dropped_at=coalesce(first_dropped_at,?),last_dropped_at=?
+                    WHERE singleton=1""",(now,now))
+            else:c.execute("INSERT INTO agent_evidence_outbox(payload) VALUES(?)",(encode((record,)),))
+            state="completed" if matched else "inconsistent"
+            # Both authenticated roles have reported, but cancellation/expiry
+            # retains quarantine; mismatched claims also keep the reservation.
+            c.execute("UPDATE goodput_requests SET state=?,finished=?,quarantine_until=? WHERE id=?",
+                (state,now,0 if matched else r["quarantine_until"],id))
+            return {"duplicate":False,"state":state}
+
+    def goodput_detail(self,id):
+        self.goodput_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");self.expire(c);r=dict(self.goodput_row(c,id))
+            for k in ("receiver_lease","source_lease"):r.pop(k)
+            for k in ("plan","receiver_report","source_report"):
+                r[k]=json.loads(r[k]) if r[k] is not None else None
+            return r

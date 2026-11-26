@@ -25,7 +25,7 @@ def secret():
     return secrets.token_urlsafe(32)
 
 from .peer_coordination import PeerCoordination,SCHEMA as PEER_SCHEMA
-from .goodput_coordination import GoodputCoordination,SCHEMA as GOODPUT_SCHEMA
+from .goodput_coordination import GoodputCoordination,SCHEMA as GOODPUT_SCHEMA,SESSION_SCHEMA
 
 class AgentStore(PeerCoordination,GoodputCoordination):
     # Only implemented types; each agent must explicitly claim local support.
@@ -39,6 +39,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
         self.max_evidence_pending=10000
         # Volatile grant relay; all accesses in serialized write transactions.
         self.peer_handoffs={}
+        self.goodput_handoffs={}
 
     @contextmanager
     def db(self):
@@ -54,7 +55,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3,4,5):
+            if version not in (0,1,2,3,4,5,6):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -119,6 +120,9 @@ class AgentStore(PeerCoordination,GoodputCoordination):
 
             if version<5:
                 c.executescript("BEGIN IMMEDIATE;"+GOODPUT_SCHEMA+"PRAGMA user_version=5;COMMIT;")
+
+            if version<6:
+                c.executescript("BEGIN IMMEDIATE;"+SESSION_SCHEMA+"PRAGMA user_version=6;COMMIT;")
 
     def capability_list(self):
         with self.db() as c:

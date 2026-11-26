@@ -123,5 +123,6 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05A4c2a-r | browser 10/10 passed / full CI failed (45771253284) | deterministic DNS initial editing and late defaults regression |
 | NIP-05A4c2b1 | CI failed (45771661675) | independent internal goodput claims, shared reservations, controller admission budget, CI isolation |
 | NIP-05A4c2b1r | implemented candidate / CI pending | old schema fixture repair, expiry clock high-water and shared queue regression |
-| NIP-05A4c2b2..C | planned | throughput coordination, runtime hardening, UI and acceptance |
+| NIP-05A4c2b2 | implemented candidate / CI pending | internal session leases, quarantine, exact receipt reconciliation and evidence |
+| NIP-05A4c2b3..C | planned | throughput coordination, runtime hardening, UI and acceptance |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

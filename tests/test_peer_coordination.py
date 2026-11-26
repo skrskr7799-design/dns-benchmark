@@ -178,4 +178,66 @@ class Tests(unittest.TestCase):
         with self.s.db() as c:
             self.assertEqual(c.execute("SELECT state FROM goodput_requests WHERE id=?",(plan(4,1).request_id,)).fetchone()[0],"cancelled")
 
+    def goodput_running(self):
+        self.goodput_claims();self.s.goodput_session_enabled=True;p=self.goodput()
+        self.s.goodput_admit(p)
+        self.assertEqual(self.s.goodput_offer(self.b["credential"])["offer"]["role"],"receiver")
+        r=self.s.goodput_prepare(self.b["credential"],p.request_id)["lease"]
+        with self.assertRaises(PeerConflict):self.s.goodput_prepare(self.b["credential"],p.request_id)
+        self.s.goodput_ready(self.b["credential"],p.request_id,r,"G"*43)
+        with self.assertRaises(PeerConflict):self.s.goodput_start(self.b["credential"],p.request_id)
+        reply=self.s.goodput_start(self.a["credential"],p.request_id)
+        self.assertEqual(reply["grant"],"G"*43)
+        with self.assertRaises(PeerConflict):self.s.goodput_start(self.a["credential"],p.request_id)
+        return p,r,reply["lease"]
+
+    def goodput_report(self,p,digest="f"*64):
+        from backend.ndc.peer_throughput import ThroughputReport
+        return ThroughputReport(plan=p,received_bytes=p.policy.byte_count,receiver_elapsed_us=5000000,payload_sha256=digest)
+
+    def test_goodput_session_dual_receipt_and_idempotence(self):
+        p,r,s=self.goodput_running();report=self.goodput_report(p)
+        self.assertTrue(self.s.goodput_status(self.a["credential"],p.request_id,s)["active"])
+        with self.assertRaises(PeerConflict):self.s.goodput_finish(self.b["credential"],p.request_id,s,report)
+        self.assertEqual(self.s.goodput_finish(self.a["credential"],p.request_id,s,report)["state"],"running")
+        self.assertEqual(self.s.evidence_status()["pending"],0)
+        self.assertEqual(self.s.goodput_finish(self.b["credential"],p.request_id,r,report)["state"],"completed")
+        self.assertTrue(self.s.goodput_finish(self.a["credential"],p.request_id,s,report)["duplicate"])
+        with self.assertRaises(PeerConflict):self.s.goodput_finish(self.a["credential"],p.request_id,s,self.goodput_report(p,"e"*64))
+        obs,_=decode(self.s.pending_evidence()["payload"])
+        self.assertEqual((obs[0].probe_kind,obs[0].outcome,obs[0].provenance),("throughput","success","agent_claim"))
+        self.assertEqual(self.s.evidence_status()["pending"],1)
+        detail=str(self.s.goodput_detail(p.request_id))
+        for secret in (r,s,"G"*43):self.assertNotIn(secret,detail)
+
+    def test_goodput_mismatch_and_cancel_quarantine(self):
+        p,r,s=self.goodput_running()
+        self.s.goodput_finish(self.a["credential"],p.request_id,s,self.goodput_report(p))
+        self.s.goodput_finish(self.b["credential"],p.request_id,r,self.goodput_report(p,"e"*64))
+        self.assertEqual(self.s.goodput_detail(p.request_id)["state"],"inconsistent")
+        obs,_=decode(self.s.pending_evidence()["payload"])
+        self.assertEqual(obs[0].outcome,"unknown")
+        self.assertIsNone(next(m.value for m in obs[0].measurements if m.name=="application_goodput"))
+        with self.assertRaises(PeerConflict):self.s.peer_admit(self.p)
+        self.now+=30;self.claims();self.s.peer_admit(self.p)
+        self.s.peer_cancel(self.p.request_id)
+        self.goodput_claims();q=self.goodput(2);self.s.goodput_admit(q)
+        lease=self.s.goodput_prepare(self.b["credential"],q.request_id)["lease"]
+        self.s.goodput_cancel(q.request_id)
+        self.assertFalse(self.s.goodput_status(self.b["credential"],q.request_id,lease)["active"])
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(self.goodput(3))
+
+    def test_goodput_lost_grant_after_restart(self):
+        self.goodput_claims();p=self.goodput();self.s.goodput_admit(p)
+        with self.assertRaises(PeerConflict):self.s.goodput_prepare(self.b["credential"],p.request_id)
+        self.s.goodput_session_enabled=True
+        r=self.s.goodput_prepare(self.b["credential"],p.request_id)["lease"]
+        self.s.goodput_ready(self.b["credential"],p.request_id,r,"G"*43)
+        self.s=AgentStore(self.path,lambda:self.now);self.s.initialize()
+        self.s.peer_enabled=self.s.goodput_enabled=self.s.goodput_session_enabled=True
+        self.assertEqual(self.s.goodput_start(self.a["credential"],p.request_id),{"state":"interrupted"})
+        with self.assertRaises(PeerConflict):self.s.goodput_start(self.a["credential"],p.request_id)
+        self.assertEqual(self.s.evidence_status()["pending"],0)
+        with self.assertRaises(PeerConflict):self.s.peer_admit(self.p)
+
 if __name__=="__main__":unittest.main()
