@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 import httpx
-from backend.ndc.agent_control_pki import Authority,client_csr,client_context,peer_fingerprint
+from backend.ndc.agent_control_pki import Authority,client_csr,client_context,peer_fingerprint,public_trust
 from backend.ndc.agent_store import AgentStore,AgentError
 from backend.ndc.agent_client import Agent
 from backend.ndc.agent_control_listener import agent_listener
@@ -21,6 +21,9 @@ class ControlTests(unittest.TestCase):
             p=Path(d)
             ca=Authority(p,"100.64.0.9")
             self.assertEqual(ca.ca_fingerprint,Authority(p,"100.64.0.9").ca_fingerprint)
+            self.assertEqual(public_trust(p),(ca.ca_pem,ca.ca_fingerprint))
+            self.assertNotIn("PRIVATE KEY",public_trust(p)[0])
+            with self.assertRaises(FileNotFoundError):public_trust(p/"missing")
             s=AgentStore(p/"agents.sqlite");s.initialize()
             inv=s.invite("UK","")
             csr=client_csr(p/"key")
@@ -98,9 +101,12 @@ class ControlTests(unittest.TestCase):
                         poll={"version":"2","engine":"python-network-v2","capabilities":["dns"]}
                         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://127.0.0.1") as h:
                             self.assertEqual((await h.post(path+"v2/poll",headers=headers,json=poll)).status_code,403)
+                            self.assertEqual((await h.post(path+"v2/poll/",headers=headers,json=poll)).status_code,404)
+                            self.assertEqual((await h.post(path+"enroll",json={"token":inv["token"]})).status_code,403)
                         async with httpx.AsyncClient(verify=client_context(ca_file),trust_env=False) as h:
                             self.assertEqual((await h.post(url+path+"v2/poll",headers=headers|{"x-client-cert":"a"*64},json=poll)).status_code,401)
                             self.assertEqual((await h.get(url+"/api/v1/agents")).status_code,404)
+                            self.assertEqual((await h.post(url+path+"v2/poll/",headers=headers,json=poll)).status_code,404)
                             self.assertEqual((await h.post(url+path+"enroll",json={"token":inv["token"],"csr":client_csr(p/"other")})).status_code,401)
                         other=s.invite("FI","");second=s.enroll(other["token"],client_csr(p/"other"),ca)
                         async with httpx.AsyncClient(verify=client_context(ca_file,p/"other",second["certificate"]),trust_env=False) as h:
@@ -123,6 +129,8 @@ class ControlTests(unittest.TestCase):
                         self.assertEqual((await asyncio.to_thread(a.post,"v2/poll",poll)).status_code,200)
                         s.revoke(inv["id"])
                         self.assertEqual((await asyncio.to_thread(a.post,"v2/poll",poll)).status_code,401)
+                        async with httpx.AsyncClient(verify=client_context(ca_file,root/"control-key.pem",saved["certificate"]),trust_env=False) as h:
+                            self.assertEqual((await h.post(url+path+"v2/poll",headers=headers,json=poll)).status_code,401)
                         a.client.close()
         asyncio.run(run())
 

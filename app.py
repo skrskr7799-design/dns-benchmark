@@ -92,6 +92,8 @@ app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 async def validation_error(request,exc):
     if request.scope.get("path","").startswith("/api/auth/"):
         return JSONResponse({"detail":"Invalid authentication fields"},422)
+    if request.scope.get("path","").startswith("/api/v1/agents/machine/"):
+        return JSONResponse({"detail":"Invalid machine payload"},422,headers={"Cache-Control":"no-store"})
     return await request_validation_exception_handler(request,exc)
 
 app.middleware('http')(guard)

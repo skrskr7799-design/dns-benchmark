@@ -151,3 +151,20 @@ def client_csr(path):
     if not isinstance(key,ec.EllipticCurvePrivateKey) or not isinstance(key.curve,ec.SECP256R1):
         raise ValueError("Invalid control key")
     return pem(x509.CertificateSigningRequestBuilder().subject_name(name("NDC enrollment")).sign(key,hashes.SHA256()))
+
+def public_trust(root):
+    # Read-only export; never initialize/replace authority or print private key.
+    data=json.loads(private_read(Path(root)/PKI_FILE))
+    ca=x509.load_pem_x509_certificate(data["ca"].encode("ascii"))
+    ca.verify_directly_issued_by(ca)
+    return pem(ca),ca.fingerprint(hashes.SHA256()).hex()
+
+def main():
+    import argparse
+    parser=argparse.ArgumentParser(description="Export existing public agent-control trust only")
+    parser.add_argument("action",choices=["public-ca","fingerprint"])
+    args=parser.parse_args()
+    ca,fp=public_trust(os.getenv("DATA_DIR","/data"))
+    print(ca if args.action=="public-ca" else fp,end="" if args.action=="public-ca" else "\n")
+
+if __name__=="__main__":main()

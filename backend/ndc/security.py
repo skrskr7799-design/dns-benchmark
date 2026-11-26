@@ -252,6 +252,10 @@ async def guard(request,call_next):
     if request.method not in ("GET","HEAD","POST","PATCH","PUT","DELETE","OPTIONS"):
         return JSONResponse({"detail":"Unsupported HTTP method"},405)
     machine=bool(re.fullmatch(r"/api/v1/agents/machine/(?:enroll|renew-control|poll|heartbeat|v2/(?:poll|heartbeat|results/[a-f0-9]{32})|results/[a-f0-9]{32}|(?:peer|goodput)/(?:claims|offer|prepare|ready|start|status|finish))",path)) and request.method=="POST"
+    # Never allow an unrecognized machine path to fall through to owner auth
+    # or framework slash redirection.
+    if path.startswith("/api/v1/agents/machine/") and not machine:
+        return JSONResponse({"detail":"Unknown machine endpoint"},404)
     tls_channel=bool(request.scope.get("ndc_agent_tls"))
     if tls_channel and not machine and not (path=="/health" and request.method=="GET"):
         return JSONResponse({"detail":"Agent TLS API only"},404)

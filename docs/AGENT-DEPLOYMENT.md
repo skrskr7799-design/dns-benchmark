@@ -12,3 +12,6 @@ First acceptance: two agents (e.g. London and Finland), shared allowlist, Agents
 Remote TCP/TLS/HTTP/Route require explicit allowed-probes.json and matching CIDRs on both agents, plus any private destination in NDC_ALLOWED_CIDRS. No broad automatic approvals; see NIP-05.md. Direct RTT/Throughput requires independent mTLS leaves and exact peer direction/traffic policy; no port publication or host-network mode is enabled by this Compose. Test these separately after ordinary DNS works. Controller Compose now passes optional feature flags and lab/atlas settings; defaults remain off. Existing CasaOS deployments require manually applying environment settings, do not overwrite unrelated settings.
 
 Known pending: actual CasaOS/NetBird/VPS verification, peak memory, convenience setup for peer mTLS, and mobile full-page visual review. No physical deployment was performed.
+
+## NetBird direct mTLS
+The separate native TLS listener replaces the reverse-proxy prerequisite when explicitly enabled. See [NetBird agent installation](NETBIRD-AGENTS.md). Do not use the legacy steps for mTLS migration. No public listener, no insecure TLS override.

@@ -64,6 +64,11 @@ class ReleaseTests(unittest.TestCase):
         execution=scenarios.run(ScenarioRun(request_id="d"*32,revision=1,dry_run=True),twin,None,None)
         experiments=ExperimentHistory(self.data/"experiments.sqlite");experiments.initialize()
         exp=experiments.save("protocol_lab",{"status":"completed","rows":[]})
+        from backend.ndc.agent_control_pki import Authority,public_trust
+        from backend.ndc.agent_store import AgentStore
+        ca=Authority(self.data,"100.64.0.9")
+        agents=AgentStore(self.data/"agents.sqlite");agents.initialize()
+        invitation=agents.invite("UK","London")
         dest=self.root/"backup"
         with open(self.data/"coordinator.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -73,6 +78,10 @@ class ReleaseTests(unittest.TestCase):
         restored=self.root/"restore"
         restore(dest,restored)
         self.assertEqual(Store(restored/"history.sqlite").get(id)["status"],"completed")
+        self.assertEqual(public_trust(restored),(ca.ca_pem,ca.ca_fingerprint))
+        self.assertEqual((restored/"agent-control-pki.json").stat().st_mode&0o777,0o600)
+        restored_agents=AgentStore(restored/"agents.sqlite");restored_agents.initialize()
+        self.assertEqual(restored_agents.list()[0]["id"],invitation["id"])
         restored_twin=TwinStore(restored/"twin.sqlite");restored_twin.initialize()
         restored_scenarios=ScenarioStore(restored/"scenarios.sqlite");restored_scenarios.initialize()
         self.assertEqual(restored_twin.get(),twin_model)
