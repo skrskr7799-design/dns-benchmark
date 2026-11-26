@@ -88,6 +88,7 @@ def agreement(config):
 
 def expected(row,control):
     if row["outcome"]!="answer" or row["rcode"]!="NOERROR" or row["cname_chain"]:return False
+    if any(rr["type"]=="A" and (rr["class"]!="IN" or dns.name.from_text(rr["name"]).canonicalize().to_text()!=control.name) for rr in row["answer"]):return False
     values={v for rr in row["answer"] if rr["type"]=="A" and rr["class"]=="IN"
         and dns.name.from_text(rr["name"]).canonicalize().to_text()==control.name for v in rr["values"]}
     return values=={control.expected_ipv4}

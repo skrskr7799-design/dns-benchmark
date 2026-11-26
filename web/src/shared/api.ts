@@ -99,6 +99,10 @@ export type GlobalRemoteKind='tcp'|'tls'|'http'|'route'
 export interface GlobalRemoteRequest {request_id:string;agent_ids:string[];config:{kind:GlobalRemoteKind;host:string;port:number;family:'ipv4'|'ipv6';scheme?:'http'|'https';path?:string;max_hops?:number}}
 export interface GlobalCapabilities {agents:{id:string;fresh:boolean;dispatchable:string[]}[]}
 export interface IntegrityAgreement {name:string;qtype:string;family:string;vantage:string;started_at:number;finished_at:number;comparable:number;groups:number;agreement:boolean|null;results:InspectionResult[];limitations:string[]}
+export interface ChainRequest {endpoint:string;family:'ipv4'|'ipv6';name:string;zones:string[];root_dnskey:string}
+export interface ChainResult {status:string;name:string;zones:string[];steps:{owner:string;type:string;signer:string;status:string;key_tags:number[];observed_peer:string|null;protocol:string|null}[];failed_stage:string|null;addresses:string[];limitations:string[]}
+export interface PacketExperiment {seed:number;samples:number;delay_ms:number;loss_pct:number;dns:'normal'|'servfail'|'timeout';timeout_ms:number}
+export interface PacketResult {status:string;methodology:string;profile:PacketExperiment;rows:{index:number;phase:'baseline'|'fault';outcome:string;elapsed_ms:number|null;fixture_dropped:boolean;fixture_received:boolean}[];baseline_success:number;fault_success:number;limitations:string[]}
 export interface DNSSECConfig {endpoint:string;family:'ipv4'|'ipv6';positive:{name:string;expected_ipv4:string};bogus:{name:string;expected_ipv4:string};anchor:{signer:string;dnskey:string}|null}
 export interface DNSSECCheck {endpoint:string;vantage:string;started_at:number;finished_at:number;behavior:string;checks:{control:string;name:string;checking_disabled_requested:boolean;expected_answer:boolean;response:InspectionResult}[];signature:{status:string;key_tag:number|null};chain_validated:boolean;limitations:string[]}
 export interface LabConfig {endpoints:string[];max_queries:number;max_seconds:number;max_parallel:number;max_count:number;corpus:string[];warmup:string}
@@ -126,6 +130,9 @@ export interface ScenarioResult extends ScenarioRun {result:{status:string;trigg
 export interface ChaosProfile {seed:number;samples:number;baseline_ms:number;delay_ms:number;loss_pct:number;dns:'normal'|'servfail'|'timeout';timeout_ms:number}
 export interface ChaosResult {status:string;methodology:string;profile:ChaosProfile;rows:{index:number;outcome:string;modeled_ms:number|null}[];counts:Record<string,number>;baseline_success:number;limitations:string[]}
 export const api = {
+  integrityChain:(body:ChainRequest)=>request<ChainResult>('/api/v1/intelligence/dns/integrity/chain',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  chaosPackets:(body:PacketExperiment)=>request<PacketResult>('/api/v1/intelligence/chaos-lab/packets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+
   experimentHistory:(kind:ExperimentSummary['kind'],signal?:AbortSignal)=>request<ExperimentSummary[]>('/api/v1/intelligence/experiments?kind='+kind,{signal}),
   experimentDetail:(id:string,signal?:AbortSignal)=>request<ExperimentDetail>('/api/v1/intelligence/experiments/'+encodeURIComponent(id),{signal}),
   experimentDelete:(id:string)=>request<{deleted:boolean}>('/api/v1/intelligence/experiments/'+encodeURIComponent(id),{method:'DELETE'}),

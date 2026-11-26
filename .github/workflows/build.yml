@@ -73,6 +73,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_inspector.py
       - name: DNS Integrity controls and independent pinned RRset signature
         run: docker exec -i benchmark python - < tests/test_dns_integrity.py
+      - name: DNSSEC positive trust chain and actual loopback UDP fault fixture
+        run: docker exec -i benchmark python - < tests/test_chain_packet.py
       - name: Protocol Laboratory bounded worker and real UDP corpus
         run: docker exec -i benchmark python - < tests/test_protocol_lab.py
       - name: Internet Atlas and Website X-Ray scope, metadata and redirects

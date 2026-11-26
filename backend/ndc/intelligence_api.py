@@ -11,6 +11,8 @@ from .dns_cohorts import aggregate,NarrowQuery
 from .dns_intelligence import rank
 from .observatory import analyze
 from .dns_integrity import Agreement,DNSSECCheck,agreement,dnssec_check
+from .dns_chain import ChainRequest,run as chain_run
+from .packet_chaos import PacketExperiment,run as packet_run
 from .protocol_lab import LabProfile,capability as lab_capability,run as lab_run
 from .internet_atlas import AtlasRequest,run as atlas_run,enabled as atlas_enabled
 from .web_xray import XRayRequest,run as xray_run
@@ -36,6 +38,20 @@ def integrity_dnssec(body:DNSSECCheck):
     if not inspection_slot.acquire(blocking=False):
         raise HTTPException(409,"Network inspection already running")
     try:return dnssec_check(body)
+    finally:inspection_slot.release()
+
+@router.post("/dns/integrity/chain")
+def integrity_chain(body:ChainRequest):
+    if not inspection_slot.acquire(blocking=False):raise HTTPException(409,"Network inspection already running")
+    try:return chain_run(body)
+    except (ValueError,RuntimeError):raise HTTPException(409,"DNSSEC chain worker unavailable") from None
+    finally:inspection_slot.release()
+
+@router.post("/chaos-lab/packets")
+def chaos_packets(body:PacketExperiment):
+    if not inspection_slot.acquire(blocking=False):raise HTTPException(409,"Network inspection already running")
+    try:return packet_run(body)
+    except (ValueError,RuntimeError):raise HTTPException(409,"Packet fixture unavailable") from None
     finally:inspection_slot.release()
 
 @router.get("/protocol-lab")

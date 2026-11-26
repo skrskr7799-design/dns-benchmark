@@ -144,3 +144,5 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 Functional completion candidate: graphical Twin and opt-in durable Lab/X-Ray history. See NIP-13.md for explicit remaining scope; no added stages.
 
 Scenario automation candidate adds periodic and observed incident trigger, revision pinning, atomic reports/cadence and capacity pause. Remaining scope unchanged (NIP-13.md).
+
+Functional candidate adds positive DNSSEC chain under explicitly supplied root key and real bounded loopback UDP DNS fault experiments; remaining acceptance in NIP-13.md. CI pending.
