@@ -29,6 +29,9 @@ test('Observatory route, pause gaps, journal and responsive states',async({page}
  for(const [width,height] of [[1536,1024],[1024,768],[768,1024],[390,844],[320,800]]){
   await page.setViewportSize({width,height})
   await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+  if(width<=480){
+   await expect.poll(async()=> (await page.locator('.obs-chart').boundingBox())?.height??0).toBeGreaterThanOrEqual(220)
+  }
   await page.screenshot({path:info.outputPath('observatory-fixture',width+'x'+height+'.png'),fullPage:true,animations:'disabled'})
  }
  noPoints=true

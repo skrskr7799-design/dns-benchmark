@@ -1,4 +1,4 @@
-import {useState} from 'react'
+import {useState,useEffect,useRef} from 'react'
 import {useQuery} from '@tanstack/react-query'
 import {Link} from '@tanstack/react-router'
 import {api,type ObservatoryReport,type ObservatoryPoint,type ObservatoryBoundary} from '../shared/api'
@@ -29,7 +29,18 @@ function pausedSpans(report:ObservatoryReport){
 function Chart({report,selected,onSelect}:{report:ObservatoryReport;selected:string;onSelect:(s:string)=>void}){
  const points=report.points
  const {since,before}=report.window
- const width=720,height=250,left=48,right=12,top=18,bottom=36
+ const svgRef=useRef<SVGSVGElement>(null)
+ const [width,setWidth]=useState(720)
+ useEffect(()=>{
+  const el=svgRef.current
+  if(!el)return
+  const resize=()=>setWidth(Math.max(240,Math.round(el.getBoundingClientRect().width)))
+  resize()
+  const observer=new ResizeObserver(resize)
+  observer.observe(el)
+  return ()=>observer.disconnect()
+ },[])
+ const height=width<480?230:250,left=width<480?34:48,right=12,top=18,bottom=36
  const max=Math.max(1,...points.flatMap(p=>[p.latency_ms??0,p.baseline_ms??0,p.threshold_ms??0]))*1.12
  const x=(t:number)=>left+Math.max(0,Math.min(1,(t-since)/(before-since)))*(width-left-right)
  const y=(n:number)=>top+(1-n/max)*(height-top-bottom)
@@ -47,7 +58,7 @@ function Chart({report,selected,onSelect}:{report:ObservatoryReport;selected:str
  }
  const chosen=points.find(p=>p.evidence_id===selected)
  return <><div className="obs-legend"><span><i className="obs-latency"/>Задержка</span><span><i className="obs-baseline"/>Базовая линия</span><span><i className="obs-threshold"/>Порог</span><span><i className="obs-pause"/>Пауза</span></div>
- <svg className="obs-chart" role="img" aria-label="График задержки, базовой линии и порога; разрывы обозначают отсутствие сопоставимых измерений" viewBox={'0 0 '+width+' '+height}>
+ <svg ref={svgRef} className="obs-chart" role="img" aria-label="График задержки, базовой линии и порога; разрывы обозначают отсутствие сопоставимых измерений" viewBox={'0 0 '+width+' '+height}>
   {Array.from({length:5},(_,i)=>{const v=max*i/4;return <g key={i}><line className="obs-gridline" x1={left} x2={width-right} y1={y(v)} y2={y(v)}/><text x={left-6} y={y(v)+4} textAnchor="end">{v.toFixed(max<10?1:0)}</text></g>})}
   {spans.map((s,i)=><rect className="obs-pause-band" key={i} x={x(s.from)} y={top} width={Math.max(0,x(s.to)-x(s.from))} height={height-top-bottom}/>)}
   <path data-series="baseline" d={paths('baseline_ms')} className="obs-line obs-line-baseline"/>
@@ -55,7 +66,7 @@ function Chart({report,selected,onSelect}:{report:ObservatoryReport;selected:str
   <path data-series="latency" d={paths('latency_ms')} className="obs-line obs-line-latency"/>
   {points.filter(p=>p.latency_ms!==null).map(p=><circle key={p.evidence_id} cx={x(p.at)} cy={y(p.latency_ms!)} r={p.evidence_id===selected?5:2.4} className={'obs-dot '+(p.state==='anomaly'||p.state==='candidate'?'obs-dot-alert':'')}><title>{stamp(p.at)} · {ms(p.latency_ms)}</title></circle>)}
   {chosen&&<line x1={x(chosen.at)} x2={x(chosen.at)} y1={top} y2={height-bottom} className="obs-selection"/>}
-  {[0,.5,1].map(f=><text key={f} x={x(since+(before-since)*f)} y={height-12} textAnchor={f===0?'start':f===1?'end':'middle'}>{new Date((since+(before-since)*f)*1000).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</text>)}
+  {(width<340?[0,1]:[0,.5,1]).map(f=><text key={f} x={x(since+(before-since)*f)} y={height-12} textAnchor={f===0?'start':f===1?'end':'middle'}>{new Date((since+(before-since)*f)*1000).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</text>)}
   <text x={left} y={12}>мс</text>
  </svg><small>Линии не соединяются через пропуски, смену профиля и известные паузы. Порог пересчитан в выбранном окне.</small>
  <label className="obs-point-picker">Измерение<select aria-label="Измерение" value={selected} onChange={e=>onSelect(e.target.value)}>{[...points].reverse().map(p=><option key={p.evidence_id} value={p.evidence_id}>{stamp(p.at)} · {ms(p.latency_ms)} · {stateName(p.state)}</option>)}</select></label></>
@@ -75,7 +86,7 @@ function Detail({data}:{data:ObservatoryReport}){
  <section className="panel obs-status"><div className="obs-status-head"><span className={'obs-state state-'+live}>{stateName(live)}</span><span className="tag">{data.monitor.kind.toUpperCase()} · {data.monitor.interval_seconds} с</span></div><h2>{data.monitor.name}</h2><p>Текущее сохранённое состояние · последняя проверка {stamp(current.last_check_at)}</p><small>Базовая линия: {current.baseline_samples_at_read}/{data.policy.baseline_maximum} измерений · минимум {data.policy.baseline_minimum}</small><div className="intel-track"><span style={{width:Math.min(100,current.baseline_samples_at_read/data.policy.baseline_maximum*100)+'%'}}/></div></section>
  <div className="obs-layout"><section className="panel obs-chart-panel"><div className="section-title"><h2><Icon name="chart"/> Задержка и базовая линия</h2><span className="tag">Window analysis</span></div>{p?<><Chart report={data} selected={p.evidence_id} onSelect={id=>{setPointId(id);setEvidence(null)}}/><dl className="obs-point-facts"><div><dt>Задержка</dt><dd>{ms(p.latency_ms)}</dd></div><div><dt>Базовая линия</dt><dd>{ms(p.baseline_ms)}</dd></div><div><dt>Порог</dt><dd>{ms(p.threshold_ms)}</dd></div><div><dt>Состояние окна</dt><dd>{stateName(p.state)}</dd></div></dl><button className="secondary" onClick={()=>setEvidence(evidence===p.evidence_id?null:p.evidence_id)} aria-expanded={evidence===p.evidence_id}>Исходное измерение</button>{evidence===p.evidence_id&&<Evidence id={p.evidence_id}/>}</>:<div className="obs-empty"><Icon name="activity" size={36}/><h3>Нет наблюдений в периоде</h3><p>Дождитесь проверок мониторинга или выберите другой период.</p></div>}</section>
  <section className="panel obs-journal"><div className="section-title"><h2><Icon name="history"/> Журнал событий</h2><span className="tag">{journal.length}</span></div><small>Сохранённые события, не реконструкция графика.</small>{journal.length?<div className="obs-journal-list">{journal.map(e=><button className="obs-event secondary" key={e.seq} aria-pressed={eventId===e.seq} onClick={()=>{setEventId(e.seq);setEvidence(null)}}><i data-type={e.type}/><span><b>{events[e.type]??e.type}</b><small>{reasons[e.reason]??e.reason}</small><small>{stamp(e.at)}</small></span><Icon name="arrow" size={16}/></button>)}</div>:<p>В этом периоде нет сохранённых событий.</p>}{selectedEvent&&<div className="obs-event-detail"><h3>{events[selectedEvent.type]??selectedEvent.type}</h3><p>{reasons[selectedEvent.reason]??selectedEvent.reason}</p><dl className="intel-facts"><div><dt>Задержка</dt><dd>{ms(selectedEvent.latency_ms)}</dd></div><div><dt>Порог</dt><dd>{ms(selectedEvent.threshold_ms)}</dd></div></dl>{selectedEvent.evidence_id?<><button className="secondary" onClick={()=>setEvidence(evidence===selectedEvent.evidence_id?null:selectedEvent.evidence_id)} aria-expanded={evidence===selectedEvent.evidence_id}>Наблюдение события</button>{evidence===selectedEvent.evidence_id&&<Evidence id={selectedEvent.evidence_id}/>}</>:<small>Связанного измерения нет.</small>}</div>}</section></div>
- <section className="panel"><div className="section-title"><h2><Icon name="activity"/> Полнота и методика</h2></div><div className="obs-counts">{[['Успешно',data.counts.success],['Деградация',data.counts.degraded],['Сбои',data.counts.failure],['Неизвестно',data.counts.unknown]].map(([l,v])=><div key={l}><small>{l}</small><strong>{v}</strong></div>)}</div><p>Доля здоровых проверок не является непрерывным uptime. Неизвестные результаты исключены из знаменателя, пропуски не считаются сбоями.</p><p>Порог: медиана + максимум из 5 мс, 50% медианы и 6 × 1,4826 × MAD. Подтверждение: {data.policy.confirmation_checks} проверки; восстановление: {data.policy.recovery_checks}.</p><p>Покрытие не подтверждено. Учёт начат {stamp(current.tracking_since)}; прежние паузы могут быть неизвестны. График пересчитывается по сохранённым измерениям, журнал не зависит от выбранного периода.</p><small>Очередь: {data.coverage.producer_status_at_response.pending} · пропущено аналитических записей: {data.coverage.producer_status_at_response.dropped} · вытеснено: {data.coverage.retained_usage_at_read.evicted} (общие счётчики мониторинга).</small>{data.coverage.stream_error&&<p className="intel-warning">Ошибка обработки аналитики: {data.coverage.stream_error}</p>}</section></>
+ <section className="panel"><div className="section-title"><h2><Icon name="activity"/> Полнота и методика</h2></div><div className="obs-counts">{[['Успешно',data.counts.success],['Деградация',data.counts.degraded],['Сбои',data.counts.failure],['Неизвестно',data.counts.unknown]].map(([l,v])=><div key={l}><small>{l}</small><strong>{v}</strong></div>)}</div><p>Доля здоровых проверок не является непрерывным uptime. Неизвестные результаты исключены из знаменателя, пропуски не считаются сбоями.</p><p>Порог: медиана + максимум из 5 мс, 50% медианы и 6 × 1,4826 × MAD. Подтверждение: {data.policy.confirmation_checks} проверки; восстановление: {data.policy.recovery_checks}.</p><p>Покрытие не подтверждено. Учёт начат {stamp(current.tracking_since)}; прежние паузы могут быть неизвестны. График пересчитывается по сохранённым измерениям, сохранённые события не пересчитываются при смене периода.</p><small>Очередь: {data.coverage.producer_status_at_response.pending} · пропущено аналитических записей: {data.coverage.producer_status_at_response.dropped} · вытеснено: {data.coverage.retained_usage_at_read.evicted} (общие счётчики мониторинга).</small>{data.coverage.stream_error&&<p className="intel-warning">Ошибка обработки аналитики: {data.coverage.stream_error}</p>}</section></>
 }
 export function Observatory(){
  const [id,setId]=useState(''),[hours,setHours]=useState(6),[before,setBefore]=useState(()=>Date.now()/1000)
