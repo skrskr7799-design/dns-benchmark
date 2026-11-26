@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from backend.ndc.agent_control_pki import Authority,private_write
-from backend.ndc.agent_bootstrap import load,prepare
+from backend.ndc.agent_bootstrap import load,prepare,confirm
 
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
@@ -20,7 +20,10 @@ class BootstrapTests(unittest.TestCase):
     def parsed(self,**changes):
         self.path.write_text(json.dumps(self.obj|changes));return load(self.path)
     def test_idempotent_and_clean(self):
-        obj=self.parsed();prepare(self.root,obj);prepare(self.root,obj)
+        obj=self.parsed()
+        with self.assertRaises(ValueError):prepare(self.root,obj)
+        with self.assertRaises(ValueError):confirm(self.root,obj,"0"*64)
+        confirm(self.root,obj,obj["ca_sha256"]);prepare(self.root,obj);prepare(self.root,obj)
         for name in ("controller-ca.pem","allowed-endpoints.json","enrollment-token"):
             self.assertEqual((self.root/name).stat().st_mode&0o777,0o600)
         private_write(self.root/"identity.json",json.dumps({"id":obj["agent_id"],"controller":obj["origin"],"certificate":"fixture"}).encode())
@@ -36,11 +39,13 @@ class BootstrapTests(unittest.TestCase):
     def test_invalid_and_expired(self):
         for changes in ({"ca_sha256":"0"*64},{"origin":"http://100.64.0.9:8443"},{"origin":"https://1.1.1.1:8443"},{"token":"bad"},{"endpoints":[]},{"endpoints":["udp://1.1.1.1"]*2}):
             with self.assertRaises(ValueError):self.parsed(**changes)
+        confirm(self.root,self.obj,self.obj["ca_sha256"])
         for changes in ({"expires_at":1},{"token":"","expires_at":0}):
             with self.assertRaises(ValueError):prepare(self.root,self.parsed(**changes))
-        self.assertEqual(list(self.root.iterdir()),[])
+        self.assertEqual([p.name for p in self.root.iterdir()],["controller-ca.sha256"])
     def test_config_mismatch_and_symlink(self):
         obj=self.parsed()
+        confirm(self.root,obj,obj["ca_sha256"])
         with patch.dict(os.environ,{"NDC_AGENT_MTLS":"0"}):
             with self.assertRaises(ValueError):prepare(self.root,obj)
         target=self.p/"target";target.write_text("untouched")

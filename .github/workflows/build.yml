@@ -57,6 +57,28 @@ jobs:
           assert json.loads(line.split("=",1)[1])==compose
           PY
       - run: docker build -t dns-benchmark:test .
+      - name: Single-file agent bootstrap policy
+        run: docker run --rm --entrypoint python -i dns-benchmark:test - < tests/test_agent_bootstrap.py
+      - name: Generated Compose actual config mount and unprivileged persistent volume
+        run: |
+          set -eu
+          dir=$(mktemp -d)
+          export BOOT_DIR="$dir"
+          docker run --rm --entrypoint python dns-benchmark:test -c 'from pathlib import Path; from backend.ndc.agent_control_pki import Authority; import json; a=Authority(Path("/data"),"100.64.0.9"); print(json.dumps({"origin":"https://100.64.0.9:8443","ca_pem":a.ca_pem,"sha256":a.ca_fingerprint}))' > "$dir/trust.json"
+          node --experimental-strip-types --input-type=module - <<'JS'
+          import {readFileSync,writeFileSync} from "node:fs";
+          import {agentCompose} from "./web/src/shared/agent-compose.ts";
+          const d=process.env.BOOT_DIR, trust=JSON.parse(readFileSync(d+"/trust.json","utf8"));
+          const invite={id:"a".repeat(32),token:"b".repeat(43),expires_at:Math.floor(Date.now()/1000)+600};
+          const yaml=agentCompose(trust,invite,{memory:384,restart:true,endpoints:["udp://1.1.1.1"]}).replace("ghcr.io/skrskr7799-design/dns-benchmark:edge","dns-benchmark:test");
+          writeFileSync(d+"/compose.yaml",yaml,{mode:0o600});
+          JS
+          trap 'docker compose -f "$dir/compose.yaml" down -v --remove-orphans >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
+          docker compose -f "$dir/compose.yaml" config --quiet
+          fp=$(jq -r .sha256 "$dir/trust.json")
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -m backend.ndc.agent_bootstrap verify "$fp"
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -c 'from pathlib import Path; from backend.ndc.agent_bootstrap import load,prepare; import os; assert os.getuid()==10001; p=Path("/data"); prepare(p,load()); assert (p/"controller-ca.pem").stat().st_mode & 0o777 == 0o600'
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -c 'from pathlib import Path; from backend.ndc.agent_bootstrap import load,prepare; p=Path("/data"); assert (p/"enrollment-token").exists(); prepare(p,load())'
       - name: Agent control PKI and real TLS listener
         run: docker run --rm --entrypoint python -i dns-benchmark:test - < tests/test_agent_control_tls.py
       - name: Python dependency audit

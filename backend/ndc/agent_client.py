@@ -69,6 +69,7 @@ class Agent:
             raise ValueError("mTLS requires HTTPS, trusted CA file and protocol 2")
         self.client=self.new_client()
         self.credential=None
+        self.expected_id=None
         self.protocol_v2=protocol_v2
         self.approvals=tuple(approvals)
         self.peer=None
@@ -109,6 +110,8 @@ class Agent:
         r=self.post("enroll",body,False)
         r.raise_for_status()
         value=r.json()
+        if self.expected_id is not None and value.get("id")!=self.expected_id:
+            raise ValueError("Invitation does not belong to configured agent")
         saved={"controller":self.url,"id":value["id"],"credential":value["credential"]}
         if self.mtls:
             self.use_certificate(value.get("certificate"))
@@ -315,10 +318,10 @@ def main():
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             obj=load()
             prepare(root,obj)
-            start(root,lock_held=True)
+            start(root,lock_held=True,expected_id=obj["agent_id"])
     else:start(root)
 
-def start(root,*,lock_held=False):
+def start(root,*,lock_held=False,expected_id=None):
     allowed=json.loads((root/"allowed-endpoints.json").read_text())
     if not isinstance(allowed,list) or not 1<=len(allowed)<=100 or any(not isinstance(x,str) for x in allowed):
         raise ValueError("Provide 1–100 explicitly approved resolver endpoints")
@@ -327,7 +330,9 @@ def start(root,*,lock_held=False):
     mode=os.getenv("NDC_AGENT_PROTOCOL","1")
     if mode not in ("1","2"):raise ValueError("Unsupported agent protocol")
     approvals=load_approvals(root/"allowed-probes.json") if mode=="2" else ()
-    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2",approvals=approvals).run(lock_held=lock_held)
+    agent=Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2",approvals=approvals)
+    agent.expected_id=expected_id
+    agent.run(lock_held=lock_held)
 
 if __name__=="__main__":
     main()

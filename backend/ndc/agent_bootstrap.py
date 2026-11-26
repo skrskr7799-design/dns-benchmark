@@ -1,5 +1,6 @@
 """Single-file local agent bootstrap. No remote execution or automatic trust."""
 import argparse
+import fcntl
 import hmac
 import ipaddress
 import json
@@ -52,11 +53,24 @@ def load(path=BOOTSTRAP):
     if type(expiry) is not int or expiry<0 or bool(token)!=bool(expiry):raise ValueError("Invalid invitation expiry")
     return obj
 
+def confirm(root,obj,expected):
+    expected=expected.lower().replace(":","")
+    if not re.fullmatch(r"[a-f0-9]{64}",expected) or not hmac.compare_digest(expected,obj["ca_sha256"]):
+        raise ValueError("Controller CA fingerprint mismatch")
+    pin=Path(root)/"controller-ca.sha256"
+    data=(expected+"\n").encode("ascii")
+    if exists(pin):
+        if not hmac.compare_digest(private_read(pin),data):raise ValueError("Volume already trusts another CA")
+    else:private_write(pin,data)
+
 def prepare(root,obj):
     """Caller holds exclusive volume lock; never overwrite identity, key or spool."""
     root=Path(root)
     if os.getenv("NDC_AGENT_MTLS")!="1" or os.getenv("NDC_AGENT_PROTOCOL")!="2" or os.getenv("NDC_CONTROLLER_URL")!=obj["origin"] or os.getenv("NDC_AGENT_CA_FILE")!=str(root/"controller-ca.pem"):
         raise ValueError("Bootstrap and agent environment differ")
+    pin=root/"controller-ca.sha256"
+    if not exists(pin) or not hmac.compare_digest(private_read(pin),(obj["ca_sha256"]+"\n").encode("ascii")):
+        raise ValueError("Verify CA fingerprint independently before startup")
     identity=root/"identity.json";enrolled=exists(identity)
     if enrolled:
         saved=json.loads(private_read(identity))
@@ -82,9 +96,10 @@ def main():
     parser.add_argument("fingerprint")
     args=parser.parse_args()
     obj=load()
-    expected=args.fingerprint.lower().replace(":","")
-    if not re.fullmatch(r"[a-f0-9]{64}",expected) or not hmac.compare_digest(expected,obj["ca_sha256"]):
-        raise SystemExit("Controller CA fingerprint mismatch")
+    root=Path(os.getenv("NDC_AGENT_DATA","/data"))
+    with open(root/"agent.lock","a") as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        confirm(root,obj,args.fingerprint)
     print("Controller CA SHA-256 verified: "+obj["ca_sha256"])
 
 if __name__=="__main__":main()
