@@ -33,7 +33,12 @@ class RemoteHTTP(RemoteTCP):
             raise ValueError("Plain origin-relative path required")
         return value
 
-RemoteConfig=Annotated[RemoteTCP|RemoteTLS|RemoteHTTP,Field(discriminator="kind")]
+class RemoteRoute(RemoteTCP):
+    kind:Literal["route"]="route"
+    port:Literal[33434]=33434
+    max_hops:int=Field(default=8,ge=1,le=8)
+
+RemoteConfig=Annotated[RemoteTCP|RemoteTLS|RemoteHTTP|RemoteRoute,Field(discriminator="kind")]
 CONFIG=TypeAdapter(RemoteConfig)
 
 def config_key(config):
@@ -137,14 +142,69 @@ class ServiceObservation(Strict):
                 raise ValueError("Invalid HTTP response")
         return self
 
+class RouteHop(Strict):
+    ttl:int=Field(ge=1,le=8)
+    status:Literal["hop","destination","timeout","port_unreachable","icmp_error","local_error"]
+    address:str|None=Field(default=None,max_length=64)
+    rtt_ms:Duration|None=None
+
+    @field_validator("address")
+    @classmethod
+    def canonical_ip(cls,value):
+        return TCPObservation.canonical_ip(value)
+
+    @model_validator(mode="after")
+    def shape(self):
+        if self.status in ("timeout","local_error") and (self.address is not None or self.rtt_ms is not None):
+            raise ValueError("Unknown hop cannot claim an address or RTT")
+        if self.status=="destination" and (self.address is None or self.rtt_ms is None):
+            raise ValueError("Destination requires address and RTT")
+        return self
+
+class RouteObservation(Strict):
+    kind:Literal["route"]="route"
+    outcome:Literal["success","partial","unknown"]
+    stage:Literal["unavailable","resolve","trace"]
+    address:str|None=Field(default=None,max_length=64)
+    dns_ms:Duration|None=None
+    total_ms:Duration
+    reached:bool=False
+    hops:list[RouteHop]=Field(default_factory=list,max_length=8)
+
+    @field_validator("address")
+    @classmethod
+    def canonical_ip(cls,value):
+        return TCPObservation.canonical_ip(value)
+
+    @model_validator(mode="after")
+    def shape(self):
+        if self.dns_ms is not None and self.dns_ms>self.total_ms:raise ValueError("Phase exceeds total")
+        if self.stage!="trace":
+            if self.outcome!="unknown" or self.address is not None or self.hops or self.reached:
+                raise ValueError("Invalid unavailable route")
+            if self.stage=="unavailable" and self.dns_ms is not None:raise ValueError("No resolution attempted")
+            return self
+        if self.address is None or not self.hops:raise ValueError("Missing route samples")
+        for i,h in enumerate(self.hops,1):
+            if h.ttl!=i or (h.rtt_ms is not None and h.rtt_ms>self.total_ms):raise ValueError("Invalid hop sequence or time")
+            if h.address is not None and ipaddress.ip_address(h.address).version!=ipaddress.ip_address(self.address).version:
+                raise ValueError("Wrong hop address family")
+            if h.status in ("destination","local_error") and i!=len(self.hops):raise ValueError("Samples after terminal hop")
+            if h.status=="destination" and h.address!=self.address:raise ValueError("Wrong destination")
+        reached=self.hops[-1].status=="destination"
+        observed=any(h.status=="hop" and h.address is not None for h in self.hops)
+        expected="success" if reached else "partial" if observed else "unknown"
+        if self.reached!=reached or self.outcome!=expected:raise ValueError("Inconsistent route outcome")
+        return self
+
 class RemoteResult(Strict):
     version:Literal["2"]
     engine:Literal["python-network-v2"]
-    kind:Literal["tcp","tls","http"]
+    kind:Literal["tcp","tls","http","route"]
     lease:Lease
     config_key:ConfigKey
     status:Literal["completed","failed"]
-    observation:TCPObservation|ServiceObservation|None=None
+    observation:TCPObservation|ServiceObservation|RouteObservation|None=None
     execution_error:Literal["local_policy_denied","deadline","cancelled","interrupted","internal_error"]|None=None
 
     @model_validator(mode="after")
@@ -154,6 +214,8 @@ class RemoteResult(Strict):
                 raise ValueError("Completed result requires observation")
             if self.kind=="tcp":
                 if not isinstance(self.observation,TCPObservation):raise ValueError("Wrong observation kind")
+            elif self.kind=="route":
+                if not isinstance(self.observation,RouteObservation):raise ValueError("Wrong route observation")
             elif not isinstance(self.observation,ServiceObservation) or self.observation.kind!=self.kind:
                 raise ValueError("Wrong observation kind")
         elif self.observation is not None or self.execution_error is None:
@@ -164,6 +226,10 @@ def validate_remote(config,body):
     if config.kind!=body.kind or config_key(config)!=body.config_key:
         raise ValueError("Result does not match leased configuration")
     o=body.observation
+    if isinstance(o,RouteObservation):
+        if len(o.hops)>config.max_hops:raise ValueError("Too many hops")
+        if o.stage=="trace" and not o.reached and o.hops[-1].status!="local_error" and len(o.hops)!=config.max_hops:
+            raise ValueError("Incomplete route marked as finished")
     if isinstance(o,ServiceObservation) and isinstance(config,RemoteHTTP):
         if config.scheme=="http" and (o.stage=="tls" or o.verified is not None):
             raise ValueError("TLS evidence for plain HTTP")
@@ -183,17 +249,25 @@ def project_remote(task_id,agent_id,config,body):
     address=o.address if o else None
     outcome=o.outcome if o else "unknown"
     metrics=tuple(Measurement(name=k,unit="ms",value=v) for k,v in (
-        ("dns",o.dns_ms),("connect",o.connect_ms),("total",o.total_ms)) if v is not None) if o else ()
+        ("dns",o.dns_ms),("connect",getattr(o,"connect_ms",None)),("total",o.total_ms)) if v is not None) if o else ()
     if isinstance(o,ServiceObservation):
         metrics+=tuple(Measurement(name=k,unit=u,value=v) for k,u,v in (
             ("tls","ms",o.tls_ms),("http","ms",o.http_ms),
             ("tls_verified","boolean",float(o.verified) if o.verified is not None else None),
             ("http_status","count",float(o.http_status) if o.http_status is not None else None)) if v is not None)
+    if isinstance(o,RouteObservation):
+        if o.stage=="trace":
+            metrics+=(Measurement(name="hops_sampled",unit="count",value=float(len(o.hops))),
+                Measurement(name="destination_reached",unit="boolean",value=1.0 if o.reached else None))
+            metrics+=tuple(Measurement(name="hop_"+str(h.ttl)+"_rtt",unit="ms",value=h.rtt_ms) for h in o.hops if h.rtt_ms is not None)
     error=body.execution_error if not o else (("http_status_failure" if o.stage=="complete" else o.stage+"_failed") if outcome=="failure" else "resolution_unavailable" if outcome=="unknown" else None)
+    if isinstance(o,RouteObservation):
+        error=("route_unavailable" if o.stage=="unavailable" else "resolution_unavailable" if o.stage=="resolve"
+            else "route_incomplete" if not o.reached else None)
     return Observation(source_kind="agent",source_id=task_id,source_revision=1,source_part=config.kind+"-v2",
         run_id=task_id,vantage_id="agent:"+agent_id,observed_at=None,
         target_id=digest({"kind":config.kind,"host":config.host,"port":config.port,"address":address}),
         profile_revision=config_key(config),probe_kind=config.kind,outcome=outcome,provenance="agent_claim",
-        measurements=metrics,protocol=("http/1.1" if isinstance(o,ServiceObservation) and o.http_status is not None else "tcp") if address else None,family=config.family if address else None,
+        measurements=metrics,protocol=("udp" if config.kind=="route" else "http/1.1" if isinstance(o,ServiceObservation) and o.http_status is not None else "tcp") if address else None,family=config.family if address else None,
         error_code=error,limitations=("agent_claim_not_attested","remote_observation_time_unavailable",
-        "single_connection_measurement"))
+        "udp_error_queue_ecmp_possible" if config.kind=="route" else "single_connection_measurement"))

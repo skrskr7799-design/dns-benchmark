@@ -11,7 +11,7 @@ import httpx
 from .agent_contract import AgentRun, ENGINE, VERSION, PROTOCOL_V2, ENGINE_V2
 from .probes.dns import measure, measure_both
 from .remote_contract import CONFIG,RemoteResult,config_key
-from .remote_worker import load_approvals,run_probe
+from .remote_worker import load_approvals,run_probe,route_capabilities
 
 def atomic(path,value):
     temp=path.with_suffix(".tmp")
@@ -113,7 +113,12 @@ class Agent:
         if not self.flush():
             return
         if self.protocol_v2:
-            capabilities=["dns"]+sorted({a.config.kind for a in self.approvals})
+            supported={a.config.kind for a in self.approvals if a.config.kind!="route"}
+            if any(a.config.kind=="route" for a in self.approvals):
+                routes=route_capabilities()
+                if any(a.config.kind=="route" and routes[a.config.family] for a in self.approvals):
+                    supported.add("route")
+            capabilities=["dns"]+sorted(supported)
             r=self.post("v2/poll",{"version":PROTOCOL_V2,"engine":ENGINE_V2,"capabilities":capabilities})
         else:
             r=self.post("poll",{"version":VERSION,"engine":ENGINE})
@@ -160,7 +165,7 @@ class Agent:
         self.flush()
 
     def remote_step(self,task):
-        if task.get("engine")!=ENGINE_V2 or task.get("kind") not in ("tcp","tls","http") or task.get("lease_seconds")!=300:
+        if task.get("engine")!=ENGINE_V2 or task.get("kind") not in ("tcp","tls","http","route") or task.get("lease_seconds")!=300:
             raise ValueError("Unsupported remote lease")
         cfg=CONFIG.validate_python(task["config"])
         if cfg.kind!=task["kind"]:raise ValueError("Remote kind mismatch")

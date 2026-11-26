@@ -25,7 +25,7 @@ def secret():
 
 class AgentStore:
     # Only implemented types; each agent must explicitly claim local support.
-    remote_kinds=("tcp","tls","http")
+    remote_kinds=("tcp","tls","http","route")
 
     def supported_kinds(self):
         return (*DISPATCHABLE_V2,*self.remote_kinds)

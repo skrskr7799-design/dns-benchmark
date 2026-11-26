@@ -295,7 +295,7 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
             assert detail["payload"]["results"][0]["ok"]==1
             assert not agent.spool.exists()
             caps=request("/api/v1/agents/capabilities")
-            assert caps["dispatchable"]==["dns","tcp","tls","http"]
+            assert caps["dispatchable"]==["dns","tcp","tls","http","route"]
             claimed=next(a for a in caps["agents"] if a["id"]==invite["id"])
             assert claimed["fresh"] and claimed["dispatchable"]==["dns"] and claimed["version"]=="2"
             assert request("/api/v1/agents")["agents"][0]["online"]
@@ -380,6 +380,34 @@ with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST
         request("/api/v1/agents/"+invitation["id"]+"/revoke",{})
     finally:agent.client.close()
 print("Real remote HTTP HEAD, redirect not followed")
+
+from backend.ndc.remote_contract import RemoteRoute
+from backend.ndc.probes.routes import route_capabilities
+if route_capabilities()["ipv4"]:
+    with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1","NDC_ALLOWED_CIDRS":"127.0.0.1/32"}):
+        cfg=RemoteRoute(host="127.0.0.1",max_hops=2)
+        invitation=request("/api/v1/agents/invite",{"name":"Route fixture","location":"loopback"})
+        root=Path(tmp);(root/"enrollment-token").write_text(invitation["token"])
+        agent=Agent(root,base,["udp://127.0.0.1"],protocol_v2=True,approvals=(Approval(config=cfg,cidrs=["127.0.0.1/32"]),))
+        try:
+            agent.enroll();agent.step()
+            task=request("/api/v1/agents/"+invitation["id"]+"/remote-tasks",{"request_id":uuid.uuid4().hex,"config":cfg.model_dump(mode="json")})["id"]
+            agent.step()
+            detail=request("/api/v1/agents/remote-tasks/"+task)
+            assert detail["state"]=="completed",detail
+            obs=detail["payload"]["observation"]
+            assert obs["reached"] and obs["hops"][0]["address"]=="127.0.0.1",obs
+            for _ in range(50):
+                rows=request("/api/v1/intelligence/observations?source=agent&limit=200")["items"]
+                found=next((x["record"] for x in rows if x["record"]["source_id"]==task),None)
+                if found:break
+                time.sleep(.2)
+            assert found and found["probe_kind"]=="route" and found["protocol"]=="udp" and found["provenance"]=="agent_claim",found
+            request("/api/v1/agents/"+invitation["id"]+"/revoke",{})
+        finally:agent.client.close()
+    print("Real remote route, loopback kernel errors and evidence drain passed")
+else:
+    print("SKIP: remote route IPv4 kernel error queue unavailable")
 
 # Same profile on two independent agent identities, including an offline interval.
 with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):

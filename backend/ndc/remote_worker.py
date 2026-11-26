@@ -12,8 +12,9 @@ import subprocess
 import sys
 import time
 from pydantic import Field,field_validator
-from .remote_contract import Strict,RemoteConfig,RemoteTCP,RemoteHTTP,TCPObservation,ServiceObservation,config_key
+from .remote_contract import Strict,RemoteConfig,RemoteTCP,RemoteHTTP,TCPObservation,ServiceObservation,RouteObservation,RouteHop,config_key
 from .scope import validate_ip
+from .probes.routes import route_socket,probe as route_hop,route_capabilities
 
 DEADLINE=12.0
 
@@ -42,13 +43,19 @@ def elapsed(t):return round((time.monotonic()-t)*1000,3)
 
 def probe(cfg,approval):
     start=time.monotonic()
+    if cfg.kind=="route":
+        try:
+            with route_socket(cfg.family):pass
+        except OSError:
+            return RouteObservation(outcome="unknown",stage="unavailable",total_ms=elapsed(start))
     def observation(**kw):
         kw["total_ms"]=elapsed(start)
+        if cfg.kind=="route":return RouteObservation(**kw)
         return TCPObservation(**kw) if cfg.kind=="tcp" else ServiceObservation(kind=cfg.kind,**kw)
     family=socket.AF_INET if cfg.family=="ipv4" else socket.AF_INET6
     nets=tuple(ipaddress.ip_network(v) for v in approval.cidrs)
     try:
-        answers=socket.getaddrinfo(cfg.host,cfg.port,family,socket.SOCK_STREAM,socket.IPPROTO_TCP)
+        answers=socket.getaddrinfo(cfg.host,cfg.port,family,socket.SOCK_DGRAM if cfg.kind=="route" else socket.SOCK_STREAM,socket.IPPROTO_UDP if cfg.kind=="route" else socket.IPPROTO_TCP)
     except OSError:
         return observation(outcome="unknown",stage="resolve",dns_ms=elapsed(start))
     dns_ms=elapsed(start)
@@ -65,6 +72,26 @@ def probe(cfg,approval):
         if checked!=str(ip):raise PermissionError("Address normalization mismatch")
         addresses.append(checked)
     address=addresses[0]
+    if cfg.kind=="route":
+        hops=[]
+        for ttl in range(1,cfg.max_hops+1):
+            raw=route_hop(address,cfg.family,ttl)
+            status=raw["status"];ip=raw["address"];rtt=raw["rtt_ms"]
+            if status in ("timeout","local_error"):ip=rtt=None
+            if ip is not None:
+                try:
+                    parsed=ipaddress.ip_address(ip)
+                    if parsed.version!=(4 if cfg.family=="ipv4" else 6) or getattr(parsed,"ipv4_mapped",None) is not None or "%" in ip:raise ValueError()
+                    ip=str(parsed)
+                except ValueError:
+                    ip=None
+            if status=="destination" and (ip!=address or rtt is None):
+                status="icmp_error"
+            hops.append(RouteHop(ttl=ttl,status=status,address=ip,rtt_ms=rtt))
+            if status in ("destination","local_error"):break
+        reached=hops[-1].status=="destination"
+        outcome="success" if reached else "partial" if any(h.status=="hop" and h.address for h in hops) else "unknown"
+        return observation(outcome=outcome,stage="trace",address=address,dns_ms=dns_ms,hops=hops,reached=reached)
     common={"address":address,"dns_ms":dns_ms}
     with socket.socket(family,socket.SOCK_STREAM,socket.IPPROTO_TCP) as sock:
         sock.settimeout(3)
@@ -125,7 +152,7 @@ def run_probe(cfg,approvals,cancel,*,deadline=DEADLINE):
                 if proc.returncode!=0 or len(raw)>8192:return None,"internal_error"
                 result=json.loads(raw)
                 if result=={"error":"local_policy_denied"}:return None,"local_policy_denied"
-                return (TCPObservation if cfg.kind=="tcp" else ServiceObservation).model_validate(result),None
+                return (TCPObservation if cfg.kind=="tcp" else RouteObservation if cfg.kind=="route" else ServiceObservation).model_validate(result),None
             except subprocess.TimeoutExpired:
                 data=None
             except (ValueError,TypeError):
