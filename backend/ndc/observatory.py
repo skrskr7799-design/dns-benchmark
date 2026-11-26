@@ -84,7 +84,7 @@ def analyze(rows,monitor,*,since,before,now,boundaries=()):
     interval=monitor["config"]["interval_seconds"]
     gap_threshold=3*interval
     counts=Counter();signals=[];points=[];state=initial_state()
-    boundaries=sorted((b for b in boundaries if b['type'] in ('tracking.started','monitor.paused','monitor.resumed')),key=lambda b:(b['at'],b['seq']))
+    boundaries=sorted((b for b in boundaries if b['type'] in ('tracking.started','monitor.paused','monitor.resumed','maintenance.started','maintenance.ended')),key=lambda b:(b['at'],b['seq']))
     boundary_index=0
     for item in rows:
         r=item["record"]

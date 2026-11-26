@@ -69,3 +69,5 @@ main{position:relative;max-width:none;padding:26px clamp(18px,2.1vw,34px);backgr
 /* NIP-03C1: plot dimensions track the rendered viewport, not a scaled desktop SVG. */
 .obs-chart text{font-size:11px}
 @media(max-width:480px){.obs-chart{min-height:220px}.obs-chart text{font-size:10px}.obs-status h2{font-size:16px}}
+
+.obs-maintenance-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:12px 0}.obs-maintenance-fields label,.obs-maintenance-fields input{min-width:0;width:100%}.obs-maintenance form{margin-bottom:12px}.obs-state.state-maintenance{color:#E6BB67}@media(max-width:600px){.obs-maintenance-fields{grid-template-columns:minmax(0,1fr)}}

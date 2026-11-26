@@ -12,7 +12,7 @@ import http.client
 import ssl
 from .models import MonitorConfig, Inspect
 from .monitor_evidence import project,encode
-from . import observatory_store
+from . import observatory_store,maintenance
 from .probes.connectivity import probe_once
 from .probes.inspector import inspect_one
 
@@ -41,7 +41,7 @@ class MonitorStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2):
+            if version not in (0,1,2,3):
                 raise RuntimeError("Unsupported monitoring schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -81,6 +81,11 @@ class MonitorStore:
                 c.execute("BEGIN IMMEDIATE")
                 observatory_store.install(c,self.clock())
                 c.execute("PRAGMA user_version=2")
+                c.commit()
+            if version<3:
+                c.execute("BEGIN IMMEDIATE")
+                maintenance.install(c)
+                c.execute("PRAGMA user_version=3")
                 c.commit()
             # Missed checks are not synthesized; a claimed check is retried on next tick.
             c.execute("UPDATE monitors SET running=0,next_at=? WHERE running=1",(self.clock(),))
@@ -144,7 +149,11 @@ class MonitorStore:
     def claim(self):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
-            r=c.execute("SELECT * FROM monitors WHERE enabled=1 AND running=0 AND next_at<=? ORDER BY next_at,id LIMIT 1",(self.clock(),)).fetchone()
+            now=self.clock()
+            maintenance.reconcile(c,now)
+            r=c.execute("""SELECT * FROM monitors m WHERE enabled=1 AND running=0 AND next_at<=?
+                AND NOT EXISTS (SELECT 1 FROM maintenance_windows w WHERE w.monitor_id=m.id AND w.state='active')
+                ORDER BY next_at,id LIMIT 1""",(now,)).fetchone()
             if not r:
                 return None
             c.execute("UPDATE monitors SET running=1 WHERE id=?",(r["id"],))
@@ -229,16 +238,46 @@ class MonitorStore:
             row["max_pending"]=self.max_evidence_pending
             return row
 
+    def maintenance_create(self,id,start,end):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            return maintenance.create(c,id,start,end,self.clock())
+
+    def maintenance_cancel(self,id,seq):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            return maintenance.cancel(c,id,seq,self.clock())
+
+    def maintenance_list(self,id):
+        with self.db() as c:
+            c.execute("BEGIN")
+            if c.execute("SELECT 1 FROM monitors WHERE id=?",(id,)).fetchone() is None:
+                return None
+            return maintenance.snapshot(c,id)
+
+    def release_failed_check(self,id):
+        # A rolled-back completion must not leave this monitor claimed forever.
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            row=c.execute("SELECT config FROM monitors WHERE id=? AND running=1",(id,)).fetchone()
+            if row:
+                cfg=MonitorConfig.model_validate_json(row[0])
+                c.execute("UPDATE monitors SET running=0,next_at=? WHERE id=?",(self.clock()+cfg.interval_seconds,id))
+
     def observatory_snapshot(self,id,since,before):
         with self.db() as c:
             c.execute("BEGIN")
-            return observatory_store.snapshot(c,id,since,before)
+            result=observatory_store.snapshot(c,id,since,before)
+            if result is not None:
+                result["maintenance"]=maintenance.snapshot(c,id)
+            return result
 
     def prune(self):
         now=self.clock()
         with self.db() as c:
             c.execute("DELETE FROM observations WHERE at<?",(now-30*86400,))
             c.execute("DELETE FROM observatory_journal WHERE at<?",(now-30*86400,))
+            maintenance.prune(c,now)
             c.execute("DELETE FROM incidents WHERE closed IS NOT NULL AND closed<?",(now-180*86400,))
             c.execute("UPDATE outbox SET state='failed' WHERE state='pending' AND created<?",(now-7*86400,))
             c.execute("DELETE FROM outbox WHERE state IN ('sent','failed') AND created<?",(now-30*86400,))
@@ -338,7 +377,11 @@ class MonitorScheduler:
                         result=self.probe(MonitorConfig.model_validate(row["config"]))
                     except Exception as exc:
                         result={"outcome":"unknown","latency_ms":None,"reason":type(exc).__name__,"details":{}}
-                    self.store.finish(row["id"],result)
+                    try:
+                        self.store.finish(row["id"],result)
+                    except Exception:
+                        self.store.release_failed_check(row["id"])
+                        raise
             finally:
                 self.slot.release()
         if self.notifier.enabled and not self.stop_event.is_set():

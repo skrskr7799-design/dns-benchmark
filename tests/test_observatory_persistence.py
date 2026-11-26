@@ -75,6 +75,7 @@ class Tests(unittest.TestCase):
         self.m.initialize()
         with self.m.db() as c:
             c.execute("DROP TRIGGER fail_journal")
+            c.execute("DROP TABLE maintenance_windows")
             c.execute("DROP TABLE observatory_journal")
             c.execute("DROP TABLE observatory_state")
             c.execute("PRAGMA user_version=1")

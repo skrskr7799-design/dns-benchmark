@@ -107,6 +107,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_observatory_persistence.py
       - name: Real controlled HTTP Observatory and backup acceptance
         run: docker exec -i benchmark python - < tests/test_observatory_live.py
+      - name: Scheduled maintenance isolation and scheduler claim recovery
+        run: docker exec -i benchmark python - < tests/test_maintenance.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

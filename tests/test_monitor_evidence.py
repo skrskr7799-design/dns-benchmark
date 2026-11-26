@@ -103,6 +103,7 @@ class Tests(unittest.TestCase):
     def test_migration_preserves_existing_history(self):
         self.check("healthy")
         with self.m.db() as c:
+            c.execute("DROP TABLE maintenance_windows")
             c.execute("DROP TABLE observatory_journal")
             c.execute("DROP TABLE observatory_state")
             c.execute("DROP TABLE monitor_evidence_outbox")
