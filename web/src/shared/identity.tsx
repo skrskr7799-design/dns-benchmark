@@ -18,6 +18,12 @@ const paths:Record<string,ReactNode>={
  check:<><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></>,
  play:<path d="m8 5 12 7-12 7Z"/>,
  clock:<><circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/></>,
+ globe:<><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 7h14M5 17h14"/></>,
+ scan:<><path d="M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5M3 12h18"/><path d="M9 8h6v8H9Z"/></>,
+ topology:<><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/><path d="M12 8v4H5v4m7-4h7v4"/></>,
+ workflow:<><rect x="3" y="3" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/><path d="M6.5 9v9H14m-4-12h7.5v9"/><path d="m11 15 3 3-3 3"/></>,
+ flask:<><path d="M9 3h6m-5 0v7l-6 9a1.5 1.5 0 0 0 1.5 2h13a1.5 1.5 0 0 0 1.5-2l-6-9V3M8 15h8"/><circle cx="11" cy="18" r=".8"/></>,
+ protocol:<><path d="M3 6h14m-4-4 4 4-4 4M21 18H7m4-4-4 4 4 4"/><path d="M4 12h16" strokeDasharray="2 3"/></>,
  chart:<path d="M4 20V12m5 8V5m5 15V9m5 11V3"/>
 }
 export function Icon({name,size=20}:{name:string;size?:number}){return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round">{paths[name]??paths.dns}</svg>}

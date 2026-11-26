@@ -4,6 +4,7 @@ from unittest.mock import patch
 import dns.name
 import dns.dnssec
 import dns.rrset
+import dns.rdatatype
 from cryptography.hazmat.primitives.asymmetric import ec
 from backend.ndc.dns_chain import ChainRequest,execute
 from backend.ndc.packet_chaos import PacketExperiment,run
@@ -22,7 +23,6 @@ class Tests(unittest.TestCase):
         a=dns.rrset.from_text("www.fixture.",60,"IN","A","192.0.2.1")
         def row(rr,private,signer,k):
             sig=dns.dnssec.sign(rr,private,signer,k,inception=now-60,expiration=now+60)
-            import dns.rdatatype
             return {"outcome":"answer","rcode":"NOERROR","cname_chain":[],"answer":[
                 {"name":rr.name.to_text(),"type":dns.rdatatype.to_text(rr.rdtype),"class":"IN","ttl":60,"values":[r.to_text() for r in rr]},
                 {"name":rr.name.to_text(),"type":"RRSIG","class":"IN","ttl":60,"values":[sig.to_text()]}]}
@@ -36,6 +36,13 @@ class Tests(unittest.TestCase):
             self.assertEqual(len(result["steps"]),4)
             self.assertEqual(result["addresses"],["192.0.2.1"])
             self.assertEqual(execute(cfg,lambda:now+120)["status"],"not_validated")
+            original=data[("www.fixture.","A")]
+            wildcard=dns.rrset.from_text("*.fixture.",60,"IN","A","192.0.2.1")
+            expanded=row(wildcard,child_private,child,key)
+            for record in expanded["answer"]:record["name"]="www.fixture."
+            data[("www.fixture.","A")]=expanded
+            self.assertEqual(execute(cfg,lambda:now)["failed_stage"],"www.fixture. A")
+            data[("www.fixture.","A")]=original
             data[("www.fixture.","A")]["answer"][0]["values"]=["192.0.2.9"]
             self.assertEqual(execute(cfg,lambda:now)["failed_stage"],"www.fixture. A")
             data[("fixture.","DS")]["answer"][0]["values"]=[dns.dnssec.make_ds(child,root,"SHA256").to_text()]

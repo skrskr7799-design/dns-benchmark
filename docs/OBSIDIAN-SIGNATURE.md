@@ -160,3 +160,6 @@ Final fixture extension includes real sample-chart UI fed deterministic mock dat
 
 ## NIP-13A — mobile drawer reconciliation
 Ported 4a5121d mobile overlay into the current multi-module navigation without removing newer routes. Restores focus, prevents layout shift, locks page scroll and dismisses via Escape/backdrop/route selection. Responsive regression assertions reinstated. Candidate CI and physical iOS Safari acceptance pending; no claim of visual reference parity.
+
+## NIP-13D — shared visual refinement candidate
+Maintains approved cyan #80D6DF, graphite matte panels and existing cube. Added filterable navigation for expanded 24-screen workspace (including mobile drawer), distinct line icons for new modules, consistent selected/focus states, positive button contrast, compact form groups, visual DNSSEC steps, actual packet result tiles and independent X-Ray phase bars. No invented network metrics; fixture captures clearly separated. Existing responsive matrix plus new populated packet and X-Ray captures at 1536/390/320; mobile filter assertion. Original reference JPEG archive and exact design-map values not available in this turn, so no pixel-perfect claim or final visual approval. Candidate CI pending.

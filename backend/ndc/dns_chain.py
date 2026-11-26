@@ -59,7 +59,7 @@ def extract(row,owner,kind,signer):
         if len(record["values"])>32:raise ValueError("Too many signatures")
         for v in record["values"]:
             sig=dns.rdata.from_text("IN","RRSIG",v)
-            if sig.covers()==rdtype and sig.signer==signer:sigs.add(sig,record["ttl"])
+            if sig.covers()==rdtype and sig.signer==signer and sig.labels==len(owner.labels)-1:sigs.add(sig,record["ttl"])
     if not len(sigs):raise ValueError("Missing signatures")
     return rr,sigs
 
