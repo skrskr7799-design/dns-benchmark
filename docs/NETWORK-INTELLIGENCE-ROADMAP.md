@@ -111,6 +111,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05A2b1 | implemented / CI passed (45755567135) | TLS and HTTP/HTTPS scoped worker and typed evidence |
 | NIP-05A2b2 | implemented / CI passed (45755942196) | bounded route worker and coverage-aware hop results |
 | NIP-05A3a | targeted tests passed / full CI failed (45756523742) | matched remote batches, bounded dispatch and compatible cohorts |
-| NIP-05A3b | implemented candidate / CI pending | pairwise observations, matched phase deltas and smoke rate-budget fix |
-| NIP-05A4..C | planned | peer measurements and UI |
+| NIP-05A3b | CI failed (45756928443) | pairwise observations, matched phase deltas and smoke rate-budget fix |
+| NIP-05A3c/A4a | candidate / CI pending | strict fixture repair, peer authorization and RTT report contract only |
+| NIP-05A4b..C | planned | authenticated peer transport, throughput, UI and acceptance |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

@@ -19,7 +19,7 @@ class Tests(unittest.TestCase):
     def report(self,cfg,rows):
         return compare(cfg,100.,220.,rows)
     def test_matching_phase_delta_and_unknown(self):
-        cfg=RemoteTCP(host="example.com")
+        cfg=RemoteTCP(host="example.com",port=443)
         r=self.report(cfg,[row(1,tcp("192.0.2.1")),row(2,tcp("192.0.2.1",connect_ms=3.,total_ms=6.)),
             row(3,tcp("192.0.2.2")),row(4,None,state="interrupted")])
         self.assertEqual(len(r["pairs"]),6)
@@ -31,12 +31,12 @@ class Tests(unittest.TestCase):
         self.assertEqual(b["phase_deltas_ms"],{})
         self.assertEqual(c["reason"],"observation_missing")
     def test_invalid_controller_window(self):
-        cfg=RemoteTCP(host="example.com")
+        cfg=RemoteTCP(host="example.com",port=443)
         r=self.report(cfg,[row(1,tcp("192.0.2.1")),row(2,tcp("192.0.2.1"),finished=550.,lease_until=520.)])
         self.assertEqual(r["pairs"][0]["reason"],"controller_window_unverified")
         self.assertEqual(r["pairs"][0]["fields"],{})
     def test_http_failure_and_tls_identity(self):
-        cfg=RemoteHTTP(host="example.com")
+        cfg=RemoteHTTP(host="example.com",port=443)
         o=tcp("192.0.2.1",verified=True,fingerprint="a"*64,tls_version="TLSv1.3",http_status=200,http_ms=1.)
         r=self.report(cfg,[row(1,o),row(2,o|{"fingerprint":"b"*64}),row(3,o|{"outcome":"failure","http_status":503})])
         self.assertEqual(r["pairs"][0]["fields"]["fingerprint"]["status"],"different_observed")
