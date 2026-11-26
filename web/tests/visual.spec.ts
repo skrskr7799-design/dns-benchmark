@@ -59,6 +59,16 @@ test('Obsidian responsive matrix',async({page},info)=>{
  await page.route('**/api/v1/agents',r=>r.fulfill({json:{agents:nodes,tasks:[]}}))
  await page.route('**/api/v1/agents/batches',r=>r.fulfill({json:[]}))
  await page.route('**/api/v1/agents/remote-batches',r=>r.fulfill({json:[]}))
+ await page.route('**/api/v1/agents/capabilities',r=>r.fulfill({json:{agents:nodes.map(n=>({id:n.id,fresh:true,dispatchable:['tcp']}))}}))
+ let peerRequestId=''
+ await page.route('**/api/v1/agents/peer-requests',async r=>{
+  const b=r.request().postDataJSON()
+  expect(b.direction).toMatchObject({source_agent_id:nodes[0].id,destination_agent_id:nodes[1].id,source_ip:'192.0.2.1',destination_ip:'192.0.2.2',port:8443,source_certificate:'a'.repeat(64),destination_certificate:'b'.repeat(64)})
+  expect(b.samples).toBe(3)
+  expect(b.request_id).toMatch(/^[a-f0-9]{32}$/)
+  if(peerRequestId){expect(b.request_id).toBe(peerRequestId);await r.fulfill({status:202,json:{id:b.request_id,duplicate:true}})}
+  else{peerRequestId=b.request_id;await r.fulfill({status:503,json:{detail:'fixture ambiguous response'}})}
+ })
  await page.route('**/api/v1/agents/global-matrix',r=>r.fulfill({json:{attempts:[
  {id:'a'.repeat(32),kind:'rtt',source_id:nodes[0].id,destination_id:nodes[1].id,created:1764000000,finished:1764000002,state:'completed',value:12.34,matched_samples:3,profile:{samples:3},source_ip:'192.0.2.1',destination_ip:'192.0.2.2',port:8443,method:'tls-echo-rtt-v1'},
  {id:'b'.repeat(32),kind:'goodput',source_id:nodes[1].id,destination_id:nodes[0].id,created:1764000000,finished:1764000003,state:'completed',value:765432,matched_samples:null,profile:{byte_count:65536,rate_bps:1000000},source_ip:'192.0.2.2',destination_ip:'192.0.2.1',port:8443,method:'tls-paced-goodput-v1'}],coverage:{rtt:{enabled:true,truncated:false,attempts_read:1},goodput:{enabled:true,truncated:false,attempts_read:1}},time_basis:'controller_admission_and_receipt',provenance:'agent_claim',limit_per_kind:200}}))
@@ -127,6 +137,23 @@ test('Obsidian responsive matrix',async({page},info)=>{
   await page.getByRole('button',{name:'Throughput',exact:true}).click()
   await expect(page.getByRole('table',{name:'Направленная матрица'})).toContainText('0.77 Мбит/с')
   await capture('global-goodput')
+  if(width===1536){
+   await page.getByText('Прямое измерение RTT / Throughput',{exact:true}).click()
+   await page.getByLabel('Источник',{exact:true}).selectOption(nodes[0].id)
+   await page.getByLabel('Получатель',{exact:true}).selectOption(nodes[1].id)
+   await page.getByLabel('IP источника',{exact:true}).fill('192.0.2.1')
+   await page.getByLabel('IP получателя',{exact:true}).fill('192.0.2.2')
+   await page.getByLabel('SHA-256 источника',{exact:true}).fill('a'.repeat(64))
+   await page.getByLabel('SHA-256 получателя',{exact:true}).fill('b'.repeat(64))
+   const launch=page.getByRole('button',{name:'Запустить прямое измерение',exact:true})
+   await expect(launch).toBeDisabled()
+   await page.getByLabel('Подтверждаю точную локальную политику обоих агентов').check()
+   await launch.click()
+   await expect(page.getByRole('alert')).toContainText('fixture ambiguous response')
+   await launch.click()
+   await expect(page.getByText('Запрос принят: '+peerRequestId,{exact:true})).toBeVisible()
+   await capture('global-launch')
+  }
   await page.goto('/#/integrations')
   await page.getByRole('button',{name:'Обновить статистику',exact:true}).click()
   await expect(page.getByText('12345',{exact:true})).toBeVisible()

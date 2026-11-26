@@ -93,7 +93,17 @@ export interface GlobalAttempt {id:string;kind:'rtt'|'goodput';source_id:string;
 export interface GlobalMatrix {attempts:GlobalAttempt[];coverage:Record<'rtt'|'goodput',{enabled:boolean;truncated:boolean;attempts_read:number}>;time_basis:string;provenance:string;limit_per_kind:number}
 export interface GlobalBatch {id:string;created:number;config:{kind:string;host:string;family:string};total:number;finished:number}
 export interface GlobalBatchDetail extends GlobalBatch {counts:Record<string,number>;members:{agent_id:string;name:string;state:string;comparison_exclusion:string|null;observation:{outcome:string;address?:string|null;total_ms?:number|null}|null}[];pairs:{left_agent_id:string;right_agent_id:string;status:string;reason:string;phase_deltas_ms:Record<string,number|null>;fields:Record<string,{left:unknown;right:unknown;status:string}>;hops:unknown[]}[];limitations:string[]}
+export interface GlobalDirection {source_agent_id:string;destination_agent_id:string;source_ip:string;destination_ip:string;port:number;source_certificate:string;destination_certificate:string}
+export type GlobalPeerPlan={request_id:string;direction:GlobalDirection;samples:number}|{request_id:string;policy:{direction:GlobalDirection;byte_count:number;rate_bps:number}}
+export type GlobalRemoteKind='tcp'|'tls'|'http'|'route'
+export interface GlobalRemoteRequest {request_id:string;agent_ids:string[];config:{kind:GlobalRemoteKind;host:string;port:number;family:'ipv4'|'ipv6';scheme?:'http'|'https';path?:string;max_hops?:number}}
+export interface GlobalCapabilities {agents:{id:string;fresh:boolean;dispatchable:string[]}[]}
 export const api = {
+  globalCapabilities:(signal?:AbortSignal)=>request<GlobalCapabilities>('/api/v1/agents/capabilities',{signal}),
+  launchGlobalPeer:(kind:'rtt'|'goodput',plan:GlobalPeerPlan)=>request<{id:string;duplicate:boolean}>('/api/v1/agents/'+(kind==='rtt'?'peer-requests':'goodput-requests'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(plan)}),
+  launchGlobalBatch:(body:GlobalRemoteRequest)=>request<{id:string;duplicate:boolean}>('/api/v1/agents/remote-batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  cancelGlobalBatch:(id:string)=>request<{cancelled:number}>('/api/v1/agents/remote-batches/'+encodeURIComponent(id)+'/cancel',{method:'POST',body:'{}'}),
+
   globalMatrix:(signal?:AbortSignal)=>request<GlobalMatrix>('/api/v1/agents/global-matrix',{signal}),
   globalBatches:(signal?:AbortSignal)=>request<GlobalBatch[]>('/api/v1/agents/remote-batches',{signal}),
   globalBatch:(id:string,signal?:AbortSignal)=>request<GlobalBatchDetail>('/api/v1/agents/remote-batches/'+encodeURIComponent(id),{signal}),
