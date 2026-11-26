@@ -10,8 +10,8 @@ from urllib.parse import urlsplit
 import httpx
 from .agent_contract import AgentRun, ENGINE, VERSION, PROTOCOL_V2, ENGINE_V2
 from .probes.dns import measure, measure_both
-from .remote_contract import RemoteTCP,RemoteResult,config_key
-from .remote_worker import load_approvals,run_tcp
+from .remote_contract import CONFIG,RemoteResult,config_key
+from .remote_worker import load_approvals,run_probe
 
 def atomic(path,value):
     temp=path.with_suffix(".tmp")
@@ -113,7 +113,7 @@ class Agent:
         if not self.flush():
             return
         if self.protocol_v2:
-            capabilities=["dns"]+(["tcp"] if self.approvals else [])
+            capabilities=["dns"]+sorted({a.config.kind for a in self.approvals})
             r=self.post("v2/poll",{"version":PROTOCOL_V2,"engine":ENGINE_V2,"capabilities":capabilities})
         else:
             r=self.post("poll",{"version":VERSION,"engine":ENGINE})
@@ -160,11 +160,12 @@ class Agent:
         self.flush()
 
     def remote_step(self,task):
-        if task.get("engine")!=ENGINE_V2 or task.get("kind")!="tcp" or task.get("lease_seconds")!=300:
+        if task.get("engine")!=ENGINE_V2 or task.get("kind") not in ("tcp","tls","http") or task.get("lease_seconds")!=300:
             raise ValueError("Unsupported remote lease")
-        cfg=RemoteTCP.model_validate(task["config"])
+        cfg=CONFIG.validate_python(task["config"])
+        if cfg.kind!=task["kind"]:raise ValueError("Remote kind mismatch")
         if config_key(cfg)!=task.get("config_key"):raise ValueError("Remote configuration mismatch")
-        result_base={"version":"2","engine":ENGINE_V2,"kind":"tcp","lease":task["lease"],"config_key":task["config_key"]}
+        result_base={"version":"2","engine":ENGINE_V2,"kind":cfg.kind,"lease":task["lease"],"config_key":task["config_key"]}
         RemoteResult.model_validate(result_base|{"status":"failed","execution_error":"interrupted"})
         atomic(self.spool,{"state":"executing","version":"2","id":task["id"],"result_base":result_base})
         cancel=threading.Event();done=threading.Event()
@@ -185,7 +186,7 @@ class Agent:
                 observation,error=None,"cancelled"
             else:
                 worker=threading.Thread(target=heartbeat,daemon=True);worker.start()
-                observation,error=run_tcp(cfg,self.approvals,cancel)
+                observation,error=run_probe(cfg,self.approvals,cancel)
         except Exception:
             observation,error=None,"internal_error"
         finally:

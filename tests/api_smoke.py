@@ -295,7 +295,7 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
             assert detail["payload"]["results"][0]["ok"]==1
             assert not agent.spool.exists()
             caps=request("/api/v1/agents/capabilities")
-            assert caps["dispatchable"]==["dns","tcp"]
+            assert caps["dispatchable"]==["dns","tcp","tls","http"]
             claimed=next(a for a in caps["agents"] if a["id"]==invite["id"])
             assert claimed["fresh"] and claimed["dispatchable"]==["dns"] and claimed["version"]=="2"
             assert request("/api/v1/agents")["agents"][0]["online"]
@@ -347,6 +347,39 @@ with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST
         request("/api/v1/agents/"+invitation["id"]+"/revoke",{})
     finally:agent.client.close()
 print("Real remote TCP agent, local denial and evidence drain passed")
+
+# Real HTTP HEAD via a separate agent, no redirect or response-body capture.
+from backend.ndc.remote_contract import RemoteHTTP
+with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1","NDC_ALLOWED_CIDRS":"127.0.0.1/32"}),socket.socket() as listener:
+    listener.bind(("127.0.0.1",0));listener.listen(1);listener.settimeout(5)
+    cfg=RemoteHTTP(host="127.0.0.1",port=listener.getsockname()[1],scheme="http",path="/health")
+    invitation=request("/api/v1/agents/invite",{"name":"HTTP fixture","location":"loopback"})
+    root=Path(tmp);(root/"enrollment-token").write_text(invitation["token"])
+    agent=Agent(root,base,["udp://127.0.0.1"],protocol_v2=True,approvals=(Approval(config=cfg,cidrs=["127.0.0.1/32"]),))
+    hits=[]
+    def http_fixture():
+        conn,_=listener.accept()
+        with conn:
+            conn.settimeout(3);raw=b""
+            while b"\r\n\r\n" not in raw and len(raw)<4096:
+                chunk=conn.recv(4096)
+                if not chunk:break
+                raw+=chunk
+            hits.append(raw.split(b"\r\n")[0])
+            conn.sendall(b"HTTP/1.1 302 Found\r\nLocation: http://169.254.169.254/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    try:
+        agent.enroll();agent.step()
+        task=request("/api/v1/agents/"+invitation["id"]+"/remote-tasks",{"request_id":uuid.uuid4().hex,"config":cfg.model_dump(mode="json")})["id"]
+        thread=threading.Thread(target=http_fixture,daemon=True);thread.start()
+        agent.step();thread.join(6)
+        assert hits==[b"HEAD /health HTTP/1.1"],hits
+        detail=request("/api/v1/agents/remote-tasks/"+task)
+        assert detail["state"]=="completed",detail
+        assert detail["payload"]["observation"]["http_status"]==302,detail
+        assert detail["payload"]["observation"]["verified"] is None
+        request("/api/v1/agents/"+invitation["id"]+"/revoke",{})
+    finally:agent.client.close()
+print("Real remote HTTP HEAD, redirect not followed")
 
 # Same profile on two independent agent identities, including an offline interval.
 with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):

@@ -85,6 +85,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_remote_tasks.py
       - name: Remote TCP worker scope, real socket, hard deadline and restart
         run: docker exec -i benchmark python - < tests/test_remote_worker.py
+      - name: Real remote TLS and HTTPS, strict trust and HTTP semantics
+        run: docker exec -i benchmark python - < tests/test_remote_services.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules

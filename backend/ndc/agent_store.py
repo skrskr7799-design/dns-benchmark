@@ -10,7 +10,7 @@ import uuid
 from contextlib import contextmanager
 from .agent_contract import ENGINE, VERSION, AgentRun, PROTOCOL_V2, CAPABILITY_TTL, DISPATCHABLE_V2
 from .agent_evidence import records,encode
-from .remote_contract import RemoteTCP,config_key,validate_remote,project_remote
+from .remote_contract import CONFIG,config_key,validate_remote,project_remote
 from .evidence import canonical
 
 class AgentError(Exception):
@@ -25,7 +25,7 @@ def secret():
 
 class AgentStore:
     # Only implemented types; each agent must explicitly claim local support.
-    remote_kinds=("tcp",)
+    remote_kinds=("tcp","tls","http")
 
     def supported_kinds(self):
         return (*DISPATCHABLE_V2,*self.remote_kinds)
@@ -376,7 +376,7 @@ class AgentStore:
             if r["contract_version"]=="1" and r["probe_kind"]=="dns":
                 return self.lease_dns(c,id)
             if r["contract_version"]!="2" or r["probe_kind"] not in self.remote_kinds:continue
-            cfg=RemoteTCP.model_validate_json(r["config"])
+            cfg=CONFIG.validate_json(r["config"])
             if cfg.kind!=r["probe_kind"]:raise AgentError(409,"Invalid stored task contract")
             lease=secret()
             c.execute("UPDATE tasks SET state='leased',lease=?,lease_until=? WHERE id=?",(digest(lease),self.clock()+300,r["id"]))
@@ -407,7 +407,7 @@ class AgentStore:
                 return {"accepted":True,"duplicate":True}
             if r["state"]!="leased" or r["lease_until"]<=self.clock():
                 raise AgentError(409,"Lease expired or task already finalized")
-            cfg=RemoteTCP.model_validate_json(r["config"])
+            cfg=CONFIG.validate_json(r["config"])
             validate_remote(cfg,body)
             now=self.clock()
             record=project_remote(id,agent,cfg,body)
