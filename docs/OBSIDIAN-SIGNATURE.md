@@ -157,3 +157,6 @@ once finished; no stable tag or merge while gates remain open.
 Extended populated visual fixtures cover Overview, Connectivity, TLS, Monitoring, Agents, Integrations and Diagnostics at the three primary widths, plus existing four screens. Total planned screenshots: 70 initial + 33 populated = 103. CI pending, not yet a visual acceptance. Route fixture browser checks remain in functional smoke; real-world testing and manual final review remain open.
 
 Final fixture extension includes real sample-chart UI fed deterministic mock data and selectable route with a missing hop. Planned screenshots now 70 initial + 36 populated = 106. These tests are not live network measurements. Main merge is conditional on new CI and visual review, and can be an integration candidate for owner testing, not a production-stable release.
+
+## NIP-13A — mobile drawer reconciliation
+Ported 4a5121d mobile overlay into the current multi-module navigation without removing newer routes. Restores focus, prevents layout shift, locks page scroll and dismisses via Escape/backdrop/route selection. Responsive regression assertions reinstated. Candidate CI and physical iOS Safari acceptance pending; no claim of visual reference parity.

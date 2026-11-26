@@ -12,9 +12,9 @@ import shutil
 import sqlite3
 import stat
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager,closing
 
-DATABASES=("history.sqlite","monitoring.sqlite","agents.sqlite","intelligence.sqlite")
+DATABASES=("history.sqlite","monitoring.sqlite","agents.sqlite","intelligence.sqlite","twin.sqlite","scenarios.sqlite")
 FILES=DATABASES+("owner-password","owner-account.json","telegram-token","adguard.json","throughput.json")
 
 @contextmanager
@@ -30,7 +30,7 @@ def checksum(path):
         return hashlib.file_digest(f,"sha256").hexdigest()
 
 def check_db(path):
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
             raise ValueError("Invalid SQLite backup: "+path.name)
         if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
@@ -54,7 +54,7 @@ def backup(root,dest):
                     raise ValueError("Not a regular file: "+name)
                 dst=dest/name
                 if name in DATABASES:
-                    with sqlite3.connect(src) as source,sqlite3.connect(dst) as target:
+                    with closing(sqlite3.connect(src)) as source,closing(sqlite3.connect(dst)) as target:
                         source.backup(target)
                     check_db(dst)
                 else:
@@ -74,9 +74,14 @@ def restore(source,dest):
     source=Path(source).resolve();dest=Path(dest).resolve()
     if dest==source or source in dest.parents or dest in source.parents:
         raise ValueError("Use a new separate data directory")
-    manifest=json.loads((source/"manifest.json").read_text())
+    p=source/"manifest.json"
+    if p.is_symlink() or not p.is_file() or p.stat().st_size>65536:
+        raise ValueError("Invalid backup manifest file")
+    manifest=json.loads(p.read_text())
+    if not isinstance(manifest,dict) or set(manifest)!={"version","files"}:
+        raise ValueError("Invalid backup manifest")
     files=manifest["files"]
-    if manifest["version"]!=1 or not isinstance(files,dict) or "history.sqlite" not in files or not set(files)<=set(FILES):
+    if type(manifest["version"]) is not int or manifest["version"]!=1 or not isinstance(files,dict) or "history.sqlite" not in files or not set(files)<=set(FILES) or any(not isinstance(v,str) or len(v)!=64 or any(ch not in "0123456789abcdef" for ch in v) for v in files.values()):
         raise ValueError("Invalid backup manifest")
     dest.mkdir(mode=0o700)
     try:

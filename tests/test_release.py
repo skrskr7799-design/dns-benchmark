@@ -9,6 +9,8 @@ from backend.ndc.backup import backup,restore
 from backend.ndc.security import Security,matches_csrf
 from backend.ndc.evidence import EvidenceStore
 from backend.ndc.benchmark_evidence import BenchmarkDrain
+from backend.ndc.network_twin import TwinStore,Save as TwinSave
+from backend.ndc.scenario import ScenarioStore,Save as ScenarioSave,Run as ScenarioRun
 from unittest.mock import patch as env_patch
 
 CFG={"endpoints":["udp://127.0.0.1"],"count":1,"mode":"cold","family":"ipv4","parallel":1}
@@ -54,6 +56,11 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(RuntimeError): BenchmarkDrain(self.store,evidence).once(crash)
         self.assertEqual(self.store.evidence_pending_count(),1)
         self.assertEqual(evidence.status()["rows"],1)
+        twin=TwinStore(self.data/"twin.sqlite");twin.initialize()
+        twin_model=twin.save(TwinSave(request_id="a"*32,expected_revision=0,graph={"nodes":[{"id":"b"*32,"name":"Gateway fixture","kind":"gateway"}],"edges":[]}),set())
+        scenarios=ScenarioStore(self.data/"scenarios.sqlite");scenarios.initialize()
+        scenario=scenarios.save(ScenarioSave(request_id="c"*32,expected_revision=0,definition={"name":"fixture","twin_revision":1,"steps":[{"id":"a","action":"twin_state","target":"b"*32}]}),twin,set())
+        execution=scenarios.run(ScenarioRun(request_id="d"*32,revision=1,dry_run=True),twin,None,None)
         dest=self.root/"backup"
         with open(self.data/"coordinator.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -63,6 +70,14 @@ class ReleaseTests(unittest.TestCase):
         restored=self.root/"restore"
         restore(dest,restored)
         self.assertEqual(Store(restored/"history.sqlite").get(id)["status"],"completed")
+        restored_twin=TwinStore(restored/"twin.sqlite");restored_twin.initialize()
+        restored_scenarios=ScenarioStore(restored/"scenarios.sqlite");restored_scenarios.initialize()
+        self.assertEqual(restored_twin.get(),twin_model)
+        self.assertEqual(restored_scenarios.latest(),scenario)
+        self.assertEqual(restored_scenarios.get_run("d"*32),execution)
+        self.assertEqual(restored_scenarios.run(ScenarioRun(request_id="d"*32,revision=1,dry_run=True),restored_twin,None,None),execution)
+        for name in ("twin.sqlite","scenarios.sqlite"):
+            self.assertEqual((restored/name).stat().st_mode&0o777,0o600)
         self.assertEqual((restored/"owner-password").stat().st_mode&0o777,0o600)
         self.assertEqual((restored/"owner-account.json").stat().st_mode&0o777,0o600)
         Security(restored).login("fixture-account-password","admin")
@@ -78,6 +93,20 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             restore(dest,self.root/"bad")
         self.assertFalse((self.root/"bad").exists())
+
+    def test_legacy_backup_and_untrusted_manifest(self):
+        import json
+        dest=self.root/"legacy"
+        backup(self.data,dest)
+        restore(dest,self.root/"legacy-restore")
+        p=dest/"manifest.json";original=p.read_text()
+        for update in ({"version":True},{"files":{"history.sqlite":"x"*64}},{"files":{"../escape":"0"*64}}):
+            p.write_text(json.dumps(json.loads(original)|update))
+            with self.assertRaises(ValueError):restore(dest,self.root/"invalid")
+            self.assertFalse((self.root/"invalid").exists())
+        p.unlink()
+        external=self.root/"external.json";external.write_text(original);p.symlink_to(external)
+        with self.assertRaises(ValueError):restore(dest,self.root/"invalid")
 
     def test_secret_permissions_and_csrf(self):
         p=self.data/"owner-password"
