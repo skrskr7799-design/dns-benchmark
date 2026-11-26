@@ -16,6 +16,7 @@ expect_error(urllib.request.Request(base+'/api/v1/intelligence/observations'),40
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/events'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/observatory/monitors'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/time-machine/snapshots'),401)
+expect_error(urllib.request.Request(base+'/api/v1/intelligence/time-machine/schedules'),401)
 login=urllib.request.Request(base+'/api/auth/login',data=json.dumps({'password':os.environ['NDC_OWNER_PASSWORD']}).encode(),headers={'Content-Type':'application/json','X-NDC-Request':'1'})
 with opener.open(login,timeout=10) as response:
     csrf=json.load(response)['csrf']
@@ -90,6 +91,17 @@ assert all(g["recommended_target_id"] is None for g in ranking["groups"])
 expect_error(urllib.request.Request(base+ranking_path+"&preset=bad"),422)
 assert isinstance(request("/api/v1/intelligence/observatory/monitors"),list)
 expect_error(urllib.request.Request(base+"/api/v1/intelligence/observatory/monitors/"+"0"*32+"?since=1&before=2"),404)
+schedule_path="/api/v1/intelligence/time-machine/schedules"
+schedule_body={"label":"smoke schedule","interval_seconds":3600}
+expect_error(urllib.request.Request(base+schedule_path,data=json.dumps(schedule_body).encode(),headers={"Content-Type":"application/json"}),403)
+schedule=request(schedule_path,schedule_body)
+assert schedule["enabled"] and schedule["runs"]==0
+assert request(schedule_path)[0]["id"]==schedule["id"]
+req=urllib.request.Request(base+schedule_path+"/"+schedule["id"],method="PATCH",data=b'{"enabled":false}',headers={"Content-Type":"application/json","X-CSRF-Token":csrf})
+with opener.open(req,timeout=10) as response: assert json.load(response)["enabled"] is False
+req=urllib.request.Request(base+schedule_path+"/"+schedule["id"],method="DELETE",headers={"X-CSRF-Token":csrf})
+with opener.open(req,timeout=10) as response: assert response.status==204
+assert request(schedule_path)==[]
 print("Authenticated intelligence read API, benchmark ingestion, cohort analysis and conservative ranking passed")
 with opener.open("http://127.0.0.1:8080/api/v1/runs/"+job_id+"/events",timeout=10) as response:
     assert b"event: snapshot" in response.read()

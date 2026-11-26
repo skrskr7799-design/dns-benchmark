@@ -4,6 +4,7 @@ from fastapi import APIRouter,Request,Query,HTTPException
 from .evidence import Source,Kind,Outcome,Conflict,Capacity
 from .time_machine import SnapshotStore
 from .snapshot_probes import Capture
+from .snapshot_schedule import ScheduleConfig,ScheduleEnable
 from .api import inspection_slot
 from pydantic import BaseModel,ConfigDict,Field
 from .dns_cohorts import aggregate,NarrowQuery
@@ -124,6 +125,31 @@ def snapshot_probe(request:Request,body:ProbeSnapshotRequest):
     finally:
         inspection_slot.release()
 
+@router.get("/time-machine/schedules")
+def schedule_list(request:Request):
+    return request.app.state.snapshot_schedules.list()
+
+@router.post("/time-machine/schedules",status_code=201)
+def schedule_create(request:Request,body:ScheduleConfig):
+    try:return request.app.state.snapshot_schedules.create(body)
+    except Capacity as exc:raise HTTPException(409,str(exc)) from None
+    except ValueError:raise HTTPException(422,"Invalid schedule") from None
+
+@router.patch("/time-machine/schedules/{id}")
+def schedule_enable(request:Request,id:str,body:ScheduleEnable):
+    try:result=request.app.state.snapshot_schedules.enable(id,body.enabled)
+    except Conflict as exc:raise HTTPException(409,str(exc)) from None
+    if result is None:raise HTTPException(404,"Schedule not found")
+    return result
+
+@router.delete("/time-machine/schedules/{id}",status_code=204)
+def schedule_delete(request:Request,id:str):
+    from fastapi import Response
+    try:deleted=request.app.state.snapshot_schedules.delete(id)
+    except Conflict as exc:raise HTTPException(409,str(exc)) from None
+    if not deleted:raise HTTPException(404,"Schedule not found")
+    return Response(status_code=204)
+
 @router.get("/time-machine/compare")
 def snapshot_compare(request:Request,older:str=Query(...,min_length=36,max_length=36),newer:str=Query(...,min_length=36,max_length=36)):
     try:
@@ -141,7 +167,9 @@ def snapshot_detail(request:Request,id:str):
 @router.delete("/time-machine/snapshots/{id}",status_code=204)
 def snapshot_delete(request:Request,id:str):
     from fastapi import Response
-    if not snapshots(request).delete(id): raise HTTPException(404,"Snapshot not found")
+    try:deleted=snapshots(request).delete(id)
+    except Conflict as exc:raise HTTPException(409,str(exc)) from None
+    if not deleted:raise HTTPException(404,"Snapshot not found")
     return Response(status_code=204)
 
 @router.get("/{kind}")

@@ -77,6 +77,8 @@ class Tests(unittest.TestCase):
         self.assertTrue(self.s.delete(a["id"]))
         self.capture()
         with self.e.db() as c:
+            c.execute("DROP TABLE snapshot_schedules")
+            c.execute("DROP TABLE snapshot_schedule_gate")
             c.execute("DROP TABLE network_snapshots")
             c.execute("PRAGMA user_version=2")
         self.e.initialize()

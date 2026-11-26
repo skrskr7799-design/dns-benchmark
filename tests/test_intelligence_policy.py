@@ -74,6 +74,8 @@ class Tests(unittest.TestCase):
         o=observation("benchmark",1)
         self.store.ingest("benchmark",1,(o,),(event(o),))
         with self.store.db() as c:
+            c.execute("DROP TABLE snapshot_schedules")
+            c.execute("DROP TABLE snapshot_schedule_gate")
             c.execute("DROP TABLE network_snapshots")
             for name in ("source_observation_insert","source_observation_delete","source_event_insert","source_event_delete"):
                 c.execute("DROP TRIGGER "+name)

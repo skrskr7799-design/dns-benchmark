@@ -153,6 +153,8 @@ class SnapshotStore:
     def delete(self,id):
         with self.evidence.db() as c:
             c.execute("BEGIN IMMEDIATE")
+            if c.execute("SELECT 1 FROM snapshot_schedules WHERE pending_id=?",(id,)).fetchone():
+                raise Conflict("Scheduled snapshot in progress")
             return c.execute("DELETE FROM network_snapshots WHERE id=?",(id,)).rowcount==1
     def compare(self,older,newer):
         with self.evidence.db() as c:

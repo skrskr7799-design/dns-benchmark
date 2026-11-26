@@ -141,7 +141,7 @@ class EvidenceStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3):
+            if version not in (0,1,2,3,4):
                 raise RuntimeError("Unsupported intelligence schema")
             if version==0:
                 c.executescript("""
@@ -211,6 +211,12 @@ class EvidenceStore:
                 c.execute("BEGIN IMMEDIATE")
                 install(c)
                 c.execute("PRAGMA user_version=3")
+                c.commit()
+            if version<4:
+                from .snapshot_schedule import install
+                c.execute("BEGIN IMMEDIATE")
+                install(c)
+                c.execute("PRAGMA user_version=4")
                 c.commit()
             c.execute("PRAGMA journal_mode=WAL")
 

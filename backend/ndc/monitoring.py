@@ -352,10 +352,12 @@ class Telegram:
             conn.close()
 
 class MonitorScheduler:
-    def __init__(self,store,slot,notifier,probe=check):
+    def __init__(self,store,slot,notifier,probe=check,*,snapshot_schedules=None):
         self.store=store;self.slot=slot;self.notifier=notifier;self.probe=probe
         self.stop_event=threading.Event()
         self.next_prune=0
+        self.snapshot_schedules=snapshot_schedules
+        self.next_snapshot_tick=0
         self.thread=threading.Thread(target=self.loop,daemon=True,name="ndc-monitor")
 
     def start(self):
@@ -384,6 +386,15 @@ class MonitorScheduler:
                         raise
             finally:
                 self.slot.release()
+        # After giving the monitor lane first opportunity, offer one bounded
+        # scheduled snapshot per minute, using the identical inspection slot.
+        if self.snapshot_schedules is not None and not self.stop_event.is_set() and time.monotonic()>=self.next_snapshot_tick:
+            if self.slot.acquire(blocking=False):
+                try:
+                    self.snapshot_schedules.tick()
+                    self.next_snapshot_tick=time.monotonic()+60
+                finally:
+                    self.slot.release()
         if self.notifier.enabled and not self.stop_event.is_set():
             row=self.store.delivery()
             if row:

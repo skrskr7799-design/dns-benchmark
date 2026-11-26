@@ -11,6 +11,7 @@ from backend.ndc.storage import Store
 from backend.ndc.evidence import EvidenceStore,RUNTIME_QUOTAS
 from backend.ndc.intelligence_api import router as intelligence_router
 from backend.ndc.evidence_drain import EvidenceDrain
+from backend.ndc.snapshot_schedule import Schedules
 from backend.ndc.jobs import Coordinator
 from backend.ndc.api import router, inspection_slot
 from backend.ndc.monitoring import MonitorStore, MonitorScheduler, Telegram
@@ -37,7 +38,10 @@ async def lifespan(app):
         app.state.coordinator=coordinator
         monitors=MonitorStore(store.path.with_name('monitoring.sqlite'))
         monitors.initialize()
-        scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent))
+        schedules=Schedules(evidence,monitors)
+        schedules.recover()
+        app.state.snapshot_schedules=schedules
+        scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent),snapshot_schedules=schedules)
         app.state.monitors=monitors
         app.state.monitor_scheduler=scheduler
         app.state.agents=AgentStore(store.path.with_name('agents.sqlite'))
