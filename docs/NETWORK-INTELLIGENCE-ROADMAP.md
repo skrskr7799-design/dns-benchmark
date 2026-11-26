@@ -103,5 +103,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-04A3 | implemented / CI passed (45746425204) | bounded snapshot schedules, shared lane, restart reconciliation |
 | NIP-04B | implemented / CI passed (45746786204) | Time Machine UI, compatible comparison, capture and schedules |
 | NIP-04C1 | implemented / CI failed (45752914452) | real scheduled TLS rotation, restore, loopback route and structured details |
-| NIP-04C2 | repair candidate / CI pending | complete backup fixture, real TLS acceptance and maintenance browser regression |
-| NIP-05..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-04C2 | CI failed (45753346652) | complete backup fixture, real TLS acceptance and maintenance browser regression |
+| NIP-04C3 | repair candidate / CI pending | shared test CA and two distinct server leaves, strict validation unchanged |
+| NIP-05 | design documented / implementation gated | [versioned agent compatibility and measurement contract](NIP-05.md) |
+| NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

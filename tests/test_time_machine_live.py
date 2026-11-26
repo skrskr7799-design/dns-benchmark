@@ -28,29 +28,54 @@ from backend.ndc.backup import backup,restore
 
 class Disabled: enabled=False
 
-def certificate(root,n):
+def authority(root):
     key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
-    name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"localhost")])
+    name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"Time Machine test CA")])
     now=datetime.datetime.now(datetime.timezone.utc)
     cert=(x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
         .serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(days=1))
-        .not_valid_after(now+datetime.timedelta(days=30))
-        .add_extension(x509.BasicConstraints(ca=True,path_length=None),critical=True)
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]),critical=False)
+        .not_valid_after(now+datetime.timedelta(days=90))
+        .add_extension(x509.BasicConstraints(ca=True,path_length=0),critical=True)
+        .add_extension(x509.KeyUsage(digital_signature=False,content_commitment=False,key_encipherment=False,
+            data_encipherment=False,key_agreement=False,key_cert_sign=True,crl_sign=True,
+            encipher_only=False,decipher_only=False),critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()),critical=False)
         .sign(key,hashes.SHA256()))
+    path=root/"ca.pem"
+    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    return path,cert,key
+
+def certificate(root,n,ca,ca_key):
+    key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+    name=x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,"localhost")])
+    now=datetime.datetime.now(datetime.timezone.utc)
+    cert=(x509.CertificateBuilder().subject_name(name).issuer_name(ca.subject).public_key(key.public_key())
+        .serial_number(x509.random_serial_number()).not_valid_before(now-datetime.timedelta(days=1))
+        .not_valid_after(now+datetime.timedelta(days=30))
+        .add_extension(x509.BasicConstraints(ca=False,path_length=None),critical=True)
+        .add_extension(x509.KeyUsage(digital_signature=True,content_commitment=False,key_encipherment=True,
+            data_encipherment=False,key_agreement=False,key_cert_sign=False,crl_sign=False,
+            encipher_only=False,decipher_only=False),critical=True)
+        .add_extension(x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()),critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),critical=False)
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]),critical=False)
+        .sign(ca_key,hashes.SHA256()))
     crt=root/f"crt{n}.pem";pem=root/f"key{n}.pem"
     crt.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     pem.write_bytes(key.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()))
     ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(crt,pem);ctx.set_alpn_protocols(["http/1.1"])
-    return crt,ctx,cert.fingerprint(hashes.SHA256()).hex()
+    return ctx,cert.fingerprint(hashes.SHA256()).hex()
 
 class Tests(unittest.TestCase):
     def test_scheduled_tls_rotation_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);data=root/"data";data.mkdir()
-            ca,a,fp_a=certificate(root,1);cb,b,fp_b=certificate(root,2)
-            bundle=root/"ca.pem";bundle.write_bytes(ca.read_bytes()+cb.read_bytes())
+            bundle,ca,ca_key=authority(root)
+            a,fp_a=certificate(root,1,ca,ca_key)
+            b,fp_b=certificate(root,2,ca,ca_key)
+            self.assertNotEqual(fp_a,fp_b)
             now=[100000.0];clock=lambda:now[0]
             listener=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
             listener.bind(("127.0.0.1",0));listener.listen(4);listener.settimeout(.2)
