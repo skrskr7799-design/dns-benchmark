@@ -308,7 +308,7 @@ class GoodputCoordination:
             # Both authenticated roles have reported, but cancellation/expiry
             # retains quarantine; mismatched claims also keep the reservation.
             c.execute("UPDATE goodput_requests SET state=?,finished=?,quarantine_until=? WHERE id=?",
-                (state,now,0 if matched else r["quarantine_until"],id))
+                (state,now,r["quarantine_until"],id))
             return {"duplicate":False,"state":state}
 
     def goodput_detail(self,id):

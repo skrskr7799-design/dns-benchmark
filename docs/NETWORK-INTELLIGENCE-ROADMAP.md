@@ -135,4 +135,5 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-10A/B | implemented / CI passed (45785884186) | owner topology revisions, monitor/evidence binding, cycle-safe impact and responsive editor |
 | NIP-11A/B, NIP-12A/B | implemented candidate / CI pending | manual read-only scenario DAG, revision-pinned reports, synthetic fault model and workspaces |
 | NIP-13A | implemented candidate / CI pending | mobile drawer reconciliation, known controller database backup/restore, acceptance gap register |
-| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10C, NIP-11C, NIP-12C, NIP-13B.. | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-13B1 | implemented candidate / CI pending | RTT terminal quarantine, goodput receipt quarantine, shared clock guard and regression tests |
+| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10C, NIP-11C, NIP-12C, NIP-13B2.. | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

@@ -84,12 +84,41 @@ class Tests(unittest.TestCase):
         self.admit();r=self.prepare();self.now+=20
         with self.assertRaises(PeerConflict):self.ready(r)
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"interrupted")
-        self.p=self.p.model_copy(update={"request_id":"b"*32});self.admit()
+        self.p=self.p.model_copy(update={"request_id":"b"*32})
+        with self.assertRaises(PeerConflict):self.admit()
+        self.now+=10;self.admit()
         self.s.peer_report_claims(self.a["credential"],[])
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"cancelled")
         self.p=self.p.model_copy(update={"request_id":"c"*32});self.admit()
         self.s.rotate(self.b["id"])
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"cancelled")
+    def test_prepared_cancel_reservation_survives_restart(self):
+        self.admit();r=self.prepare()
+        self.s.peer_cancel(self.p.request_id)
+        self.assertFalse(self.s.peer_status(self.b["credential"],self.p.request_id,r)["active"])
+        self.s=AgentStore(self.path,lambda:self.now);self.s.initialize();self.claims()
+        self.p=self.p.model_copy(update={"request_id":"b"*32})
+        with self.assertRaises(PeerConflict):self.s.peer_admit(self.p)
+        cfg=AgentRun(endpoints=["udp://127.0.0.1"])
+        self.s.enqueue(self.a["id"],cfg)
+        heartbeat=PollV2(version="2",engine="python-network-v2",capabilities=["dns"])
+        self.assertIsNone(self.s.poll_v2(self.a["credential"],heartbeat)["task"])
+        self.now+=29
+        self.assertIsNone(self.s.poll_v2(self.a["credential"],heartbeat)["task"])
+        self.now+=1
+        self.assertIsNotNone(self.s.poll_v2(self.a["credential"],heartbeat)["task"])
+
+    def test_peer_clock_rollback_rejects_new_handoff(self):
+        self.admit();r=self.prepare()
+        self.now+=5
+        self.s.peer_status(self.b["credential"],self.p.request_id,r)
+        self.now-=1
+        self.assertFalse(self.s.peer_status(self.b["credential"],self.p.request_id,r)["active"])
+        with self.assertRaises(PeerConflict):self.ready(r)
+        with self.assertRaises(PeerConflict):self.claims()
+        self.now+=1
+        self.ready(r)
+
     def test_migration(self):
         with self.s.db() as c:
             c.execute("DROP TABLE goodput_requests");c.execute("DROP TABLE goodput_claims");c.execute("DROP TABLE goodput_clock")
@@ -202,6 +231,8 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.s.goodput_finish(self.a["credential"],p.request_id,s,report)["state"],"running")
         self.assertEqual(self.s.evidence_status()["pending"],0)
         self.assertEqual(self.s.goodput_finish(self.b["credential"],p.request_id,r,report)["state"],"completed")
+        # A pair of receipts is not proof that local sockets have closed.
+        with self.assertRaises(PeerConflict):self.s.peer_admit(self.p)
         self.assertTrue(self.s.goodput_finish(self.a["credential"],p.request_id,s,report)["duplicate"])
         with self.assertRaises(PeerConflict):self.s.goodput_finish(self.a["credential"],p.request_id,s,self.goodput_report(p,"e"*64))
         obs,_=decode(self.s.pending_evidence()["payload"])

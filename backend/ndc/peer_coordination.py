@@ -2,6 +2,7 @@
 The controller records claims, not proof of local policy or transport execution.
 """
 import hashlib
+import math
 import ipaddress
 import json
 import secrets
@@ -16,6 +17,7 @@ PREPARE_SECONDS=20
 READY_SECONDS=15
 QUEUE_SECONDS=120
 RETENTION=30*86400
+QUARANTINE_SECONDS=10
 
 SCHEMA="""
 CREATE TABLE peer_claims(
@@ -46,14 +48,23 @@ class PeerCoordination:
     peer_enabled=False
 
     def peer_reserved(self,c,id):
+        now=self.clock()
+        # A prepared receiver or started source can still be unwinding after
+        # cancellation, credential rotation, restart or the final receipt.
+        # Keep the deadline as the durable quarantine basis; queued-only
+        # requests have never received a lease and may release immediately.
         return self.goodput_reserved(c,id) or bool(c.execute("""SELECT 1 FROM peer_requests WHERE
-            (source_id=? OR destination_id=?) AND finished IS NULL LIMIT 1""",(id,id)).fetchone())
+            (source_id=? OR destination_id=?) AND (finished IS NULL OR
+            (receiver_lease IS NOT NULL AND deadline+?>?)) LIMIT 1""",
+            (id,id,QUARANTINE_SECONDS,now if math.isfinite(now) else 0)).fetchone())
 
     def peer_expire(self,c,now):
+        last=c.execute("SELECT last FROM goodput_clock WHERE singleton=1").fetchone()[0]
+        if not math.isfinite(now) or now<last:return
         self.goodput_expire(c,now)
         c.execute("""UPDATE peer_requests SET state='interrupted',outcome='unknown',finished=?
             WHERE finished IS NULL AND (deadline<=? OR created>?)""",(now,now,now))
-        c.execute("DELETE FROM peer_requests WHERE finished IS NOT NULL AND finished<?",(now-RETENTION,))
+        c.execute("DELETE FROM peer_requests WHERE finished IS NOT NULL AND finished<? AND deadline+?<=?",(now-RETENTION,QUARANTINE_SECONDS,now))
         c.execute("DELETE FROM peer_claims WHERE reported_at<=? OR reported_at>?",(now-CLAIM_TTL,now))
         for id in tuple(self.peer_handoffs):
             if not c.execute("SELECT 1 FROM peer_requests WHERE id=? AND state='ready' AND deadline>?",(id,now)).fetchone():
@@ -78,7 +89,7 @@ class PeerCoordination:
         if len(keys)!=len(ds):raise ValueError("Duplicate direction")
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
-            id=self.identity(c,credential);self.expire(c)
+            id=self.identity(c,credential);self.goodput_now(c);self.expire(c)
             if any(id not in (d.source_agent_id,d.destination_agent_id) for d in ds):
                 raise PeerConflict("Unrelated direction")
             # A withdrawn approval invalidates pending/active work. Refreshing
@@ -92,6 +103,8 @@ class PeerCoordination:
 
     def peer_fresh(self,c,d):
         now=self.clock()
+        last=c.execute("SELECT last FROM goodput_clock WHERE singleton=1").fetchone()[0]
+        if not math.isfinite(now) or now<last:return False
         for id in (d.source_agent_id,d.destination_agent_id):
             r=c.execute("""SELECT p.reported_at FROM peer_claims p JOIN agents a ON a.id=p.agent_id
                 WHERE p.agent_id=? AND p.direction_key=? AND a.revoked=0 AND a.credential IS NOT NULL""",(id,direction_key(d))).fetchone()
@@ -103,7 +116,7 @@ class PeerCoordination:
         plan=RTTPlan.model_validate(plan.model_dump(mode="json"))
         encoded=canonical(plan.model_dump(mode="json"));d=plan.direction
         with self.db() as c:
-            c.execute("BEGIN IMMEDIATE");self.expire(c)
+            c.execute("BEGIN IMMEDIATE");self.goodput_now(c);self.expire(c)
             if c.execute("SELECT 1 FROM goodput_requests WHERE id=?",(plan.request_id,)).fetchone():raise PeerConflict("Cross-kind request ID conflict")
             existing=c.execute("SELECT plan FROM peer_requests WHERE id=?",(plan.request_id,)).fetchone()
             if existing:
