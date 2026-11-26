@@ -99,4 +99,5 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-03C1 | implemented / CI passed (45743862564) | real controlled HTTP probe, active-anomaly backup replay, mobile plot polish |
 | NIP-03C2 | implemented / CI passed (45744665875) | scheduled maintenance, claim recovery, Observatory controls |
 | NIP-04A1 | implemented candidate / CI pending | [immutable monitor snapshots and semantic diff](NIP-04.md) |
-| NIP-04A2..13 | planned | DNS/TLS/route capture, timeline, cadence and remaining modules; physical budget and shared scheduler hardening remain open |
+| NIP-04A2 | implemented candidate / CI pending | scoped DNS/TLS/route snapshots and semantic diff |
+| NIP-04A3..13 | planned | cadence, timeline UI and remaining modules; physical budget and shared scheduler hardening remain open |

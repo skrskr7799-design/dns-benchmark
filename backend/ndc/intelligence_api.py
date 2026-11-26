@@ -3,6 +3,8 @@ from typing import Literal
 from fastapi import APIRouter,Request,Query,HTTPException
 from .evidence import Source,Kind,Outcome,Conflict,Capacity
 from .time_machine import SnapshotStore
+from .snapshot_probes import Capture
+from .api import inspection_slot
 from pydantic import BaseModel,ConfigDict,Field
 from .dns_cohorts import aggregate,NarrowQuery
 from .dns_intelligence import rank
@@ -107,6 +109,20 @@ def snapshot_create(request:Request,body:SnapshotRequest):
         return snapshots(request).create(body.request_id,body.label,request.app.state.monitors)
     except (Conflict,Capacity) as exc: raise HTTPException(409,str(exc)) from None
     except ValueError: raise HTTPException(422,"Invalid snapshot request") from None
+
+class ProbeSnapshotRequest(SnapshotRequest):
+    probe:Capture
+
+@router.post("/time-machine/probes",status_code=201)
+def snapshot_probe(request:Request,body:ProbeSnapshotRequest):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"Network inspection already running")
+    try:
+        return snapshots(request).create_probe(body.request_id,body.label,body.probe)
+    except (Conflict,Capacity) as exc: raise HTTPException(409,str(exc)) from None
+    except ValueError: raise HTTPException(422,"Invalid probe snapshot") from None
+    finally:
+        inspection_slot.release()
 
 @router.get("/time-machine/compare")
 def snapshot_compare(request:Request,older:str=Query(...,min_length=36,max_length=36),newer:str=Query(...,min_length=36,max_length=36)):

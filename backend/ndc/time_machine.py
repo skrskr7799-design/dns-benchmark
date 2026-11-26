@@ -69,6 +69,7 @@ def capture_monitor_inventory(store):
 
 def item(row,*,full=True):
     result={k:row[k] for k in ("seq","id","label","captured_at","content_hash","size")}
+    if not full and "scope" in row.keys(): result["scope"]=row["scope"]
     if full:
         result["snapshot"]=json.loads(row["payload"])
         if digest(result["snapshot"])!=row["content_hash"]: raise Conflict("Snapshot content checksum mismatch")
@@ -82,14 +83,14 @@ class SnapshotStore:
             raise ValueError("Invalid snapshot identity or label")
         prior=self.get(request_id)
         if prior:
-            if prior["label"]!=label: raise Conflict("Snapshot id reused with another label")
+            if prior["label"]!=label or prior["snapshot"]["scope"]!="configured_monitors": raise Conflict("Snapshot id reused with different request")
             return prior
         data=capture_monitor_inventory(monitors)
         with self.evidence.db() as c:
             c.execute("BEGIN IMMEDIATE")
             prior=c.execute("SELECT * FROM network_snapshots WHERE id=?",(request_id,)).fetchone()
             if prior:
-                if prior["label"]!=label: raise Conflict("Snapshot id reused with another label")
+                if prior["label"]!=label or item(prior)["snapshot"]["scope"]!="configured_monitors": raise Conflict("Snapshot id reused with different request")
                 return item(prior)
             for m in data["monitors"]:
                 o=m["observation"]
@@ -110,6 +111,31 @@ class SnapshotStore:
             c.execute("INSERT INTO network_snapshots(id,captured_at,label,payload,content_hash,size) VALUES(?,?,?,?,?,?)",
                 (request_id,data["captured_at"],label,raw,digest(data),size))
             return item(c.execute("SELECT * FROM network_snapshots WHERE id=?",(request_id,)).fetchone())
+    def create_probe(self,request_id,label,cfg):
+        from .snapshot_probes import capture,config_key
+        if str(uuid.UUID(request_id))!=request_id or not isinstance(label,str) or not 1<=len(label)<=80 or not label.strip():
+            raise ValueError("Invalid snapshot identity or label")
+        def replay(prior):
+            if prior["label"]!=label or prior["snapshot"].get("config_key")!=config_key(cfg):
+                raise Conflict("Snapshot id reused with different request")
+            return prior
+        prior=self.get(request_id)
+        if prior: return replay(prior)
+        usage=self.list(limit=1)["usage"]
+        if usage["count"]>=self.max_snapshots or usage["bytes"]>=self.max_bytes:
+            raise Capacity("Snapshot capacity reached")
+        data=capture(cfg,self.evidence.clock)
+        raw=canonical(data);size=len(raw.encode("ascii"))
+        with self.evidence.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            prior=c.execute("SELECT * FROM network_snapshots WHERE id=?",(request_id,)).fetchone()
+            if prior: return replay(item(prior))
+            used=c.execute("SELECT count(*),coalesce(sum(size),0) FROM network_snapshots").fetchone()
+            if size>MAX_SNAPSHOT_BYTES or used[0]>=self.max_snapshots or used[1]+size>self.max_bytes:
+                raise Capacity("Snapshot capacity reached; explicitly delete an old snapshot")
+            c.execute("INSERT INTO network_snapshots(id,captured_at,label,payload,content_hash,size) VALUES(?,?,?,?,?,?)",
+                (request_id,data["captured_at"],label,raw,digest(data),size))
+            return item(c.execute("SELECT * FROM network_snapshots WHERE id=?",(request_id,)).fetchone())
     def get(self,id):
         with self.evidence.db() as c:
             r=c.execute("SELECT * FROM network_snapshots WHERE id=?",(id,)).fetchone()
@@ -118,7 +144,7 @@ class SnapshotStore:
         if type(limit) is not int or not 1<=limit<=100: raise ValueError("Invalid limit")
         with self.evidence.db() as c:
             c.execute("BEGIN")
-            rows=c.execute("SELECT seq,id,label,captured_at,content_hash,size FROM network_snapshots WHERE seq<? ORDER BY seq DESC LIMIT ?",
+            rows=c.execute("SELECT seq,id,label,captured_at,content_hash,size,json_extract(payload,'$.scope') AS scope FROM network_snapshots WHERE seq<? ORDER BY seq DESC LIMIT ?",
                 (before if before is not None else 9223372036854775807,limit+1)).fetchall()
             entries=[item(r,full=False) for r in rows[:limit]]
             count,size=c.execute("SELECT count(*),coalesce(sum(size),0) FROM network_snapshots").fetchone()
@@ -135,6 +161,9 @@ class SnapshotStore:
             if any(r is None for r in rows): return None
             a,b=(item(r) for r in rows)
             if a["seq"]>=b["seq"]: raise ValueError("Choose two snapshots in creation order")
+            if a["snapshot"]["scope"]!="configured_monitors" or b["snapshot"]["scope"]!="configured_monitors":
+                from .snapshot_probes import compare_probes
+                return compare_probes(a,b)
             return compare(a,b)
 
 def compare(a,b):
