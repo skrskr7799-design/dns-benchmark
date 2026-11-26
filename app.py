@@ -12,6 +12,7 @@ from backend.ndc.evidence import EvidenceStore,RUNTIME_QUOTAS
 from backend.ndc.intelligence_api import router as intelligence_router
 from backend.ndc.evidence_drain import EvidenceDrain
 from backend.ndc.snapshot_schedule import Schedules
+from backend.ndc.network_twin import TwinStore
 from backend.ndc.jobs import Coordinator
 from backend.ndc.api import router, inspection_slot
 from backend.ndc.monitoring import MonitorStore, MonitorScheduler, Telegram
@@ -34,6 +35,8 @@ async def lifespan(app):
         evidence=EvidenceStore(store.path.with_name("intelligence.sqlite"),quotas=RUNTIME_QUOTAS)
         evidence.initialize()
         app.state.evidence=evidence
+        app.state.twin=TwinStore(store.path.with_name('twin.sqlite'))
+        app.state.twin.initialize()
         coordinator=Coordinator(store)
         app.state.store=store
         app.state.coordinator=coordinator

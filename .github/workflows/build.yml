@@ -77,6 +77,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_protocol_lab.py
       - name: Internet Atlas and Website X-Ray scope, metadata and redirects
         run: docker exec -i benchmark python - < tests/test_atlas_xray.py
+      - name: Network Twin revisions, monitor binding and cycle-safe impact
+        run: docker exec -i benchmark python - < tests/test_network_twin.py
       - name: Connectivity and TLS integration
         run: docker exec -i benchmark python - < tests/test_network.py
       - name: Route analyzer integration

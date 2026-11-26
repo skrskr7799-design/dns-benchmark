@@ -132,4 +132,5 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-06A/B | implemented / CI passed (45783888520) | resolver agreement, controlled DNSSEC behavior, pinned-key signature check and UI; no root-chain or client leak claim |
 | NIP-07A/B | implemented / CI passed (45784324206) | configured endpoint laboratory, fixed workload, child deadline, matched transport/reuse comparison and UI |
 | NIP-08A/B, NIP-09A/B | implemented candidate / CI pending | opt-in fixed-provider Atlas, bounded HEAD X-Ray, both workspaces |
-| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-10A/B | implemented candidate / CI pending | owner topology revisions, monitor/evidence binding, cycle-safe impact and responsive editor |
+| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10C, NIP-11..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

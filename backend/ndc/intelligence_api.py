@@ -14,6 +14,7 @@ from .dns_integrity import Agreement,DNSSECCheck,agreement,dnssec_check
 from .protocol_lab import LabProfile,capability as lab_capability,run as lab_run
 from .internet_atlas import AtlasRequest,run as atlas_run,enabled as atlas_enabled
 from .web_xray import XRayRequest,run as xray_run
+from .network_twin import Save as TwinSave,report as twin_report
 import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
@@ -66,6 +67,25 @@ def website_xray(body:XRayRequest):
     try:return xray_run(body)
     except (ValueError,RuntimeError):raise HTTPException(409,"Website X-Ray unavailable") from None
     finally:inspection_slot.release()
+
+@router.get("/twin")
+def twin(request:Request,revision:int|None=Query(None,ge=0,le=128)):
+    state=request.app.state
+    try:r=twin_report(state.twin,state.monitors,state.evidence,revision)
+    except Conflict as exc:raise HTTPException(409,str(exc)) from None
+    if r is None:raise HTTPException(404,"Twin revision not found")
+    return r
+
+@router.get("/twin/revisions")
+def twin_revisions(request:Request):
+    return request.app.state.twin.history()
+
+@router.post("/twin",status_code=201)
+def twin_save(request:Request,body:TwinSave):
+    state=request.app.state
+    try:return state.twin.save(body,{m["id"] for m in state.monitors.list()})
+    except (Conflict,Capacity) as exc:raise HTTPException(409,str(exc)) from None
+    except ValueError:raise HTTPException(422,"Invalid topology or monitor binding") from None
 
 @router.get("/dns/cohorts")
 def dns_cohorts(request:Request,since:float=Query(...,ge=0,le=253402300799),

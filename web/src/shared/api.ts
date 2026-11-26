@@ -107,7 +107,17 @@ export interface LabResult {methodology:string;profile:LabProfile;profile_key:st
 export interface AtlasReport {target:string;family:string;resolved_ip:string|null;asn:number|null;started_at:number;finished_at:number;data:Record<string,{retrieved_at:number;value:Record<string,unknown>}>;errors:Record<string,string>;cached:boolean;limitations:string[]}
 export interface XRayHop extends NetworkProbe {url:string;selected_headers?:Record<string,string[]>;header_presence?:string[]}
 export interface XRayReport {request:{url:string;family:string;follow_redirects:boolean};started_at:number;finished_at:number;status:string;hops:XRayHop[];limitations:string[]}
+export interface TwinNode {id:string;name:string;kind:'device'|'service'|'site'|'resolver'|'gateway'|'agent';monitor_id:string|null}
+export interface TwinEdge {source:string;target:string;kind:'requires'|'uses'|'located_at'}
+export interface TwinGraph {nodes:TwinNode[];edges:TwinEdge[]}
+export interface TwinRevision {revision:number;parent:number|null;created:number|null;hash:string|null}
+export interface TwinModel extends TwinRevision {graph:TwinGraph}
+export interface TwinReport {model:TwinModel;observed_at:number;nodes:{id:string;direct:string;binding_status:string;observed_at:number|null;evidence_id:string|null;dependency_impact:string;failed_dependencies:string[];degraded_dependencies:string[];unknown_dependencies:string[];cycle:boolean;potentially_affected:string[]}[];limitations:string[]}
 export const api = {
+  twin:(revision:number|null,signal?:AbortSignal)=>request<TwinReport>('/api/v1/intelligence/twin'+(revision===null?'':'?revision='+revision),{signal}),
+  twinRevisions:(signal?:AbortSignal)=>request<TwinRevision[]>('/api/v1/intelligence/twin/revisions',{signal}),
+  twinSave:(body:{request_id:string;expected_revision:number;graph:TwinGraph})=>request<TwinModel>('/api/v1/intelligence/twin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+
   atlasConfig:(signal?:AbortSignal)=>request<{enabled:boolean;providers:string[];cache_seconds:number}>('/api/v1/intelligence/atlas',{signal}),
   atlasLookup:(body:{target:string;family:'ipv4'|'ipv6'})=>request<AtlasReport>('/api/v1/intelligence/atlas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
   xray:(body:{url:string;family:'ipv4'|'ipv6';follow_redirects:boolean})=>request<XRayReport>('/api/v1/intelligence/website-xray',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
