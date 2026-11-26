@@ -65,6 +65,8 @@ class Tests(unittest.TestCase):
     def test_migration_and_retention(self):
         legacy=self.s.batch(Batch(request_id="b"*32,agent_ids=self.body.agent_ids,config=AgentRun(endpoints=["udp://127.0.0.1"])))
         with self.s.db() as c:
+            c.execute("DROP TABLE peer_requests")
+            c.execute("DROP TABLE peer_claims")
             c.execute("DROP TABLE remote_batch_policy")
             c.execute("PRAGMA user_version=2")
         self.s.initialize();self.assertEqual(self.s.batches()[0]["id"],legacy["id"])

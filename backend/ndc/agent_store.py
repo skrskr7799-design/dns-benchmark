@@ -24,7 +24,9 @@ def digest(token):
 def secret():
     return secrets.token_urlsafe(32)
 
-class AgentStore:
+from .peer_coordination import PeerCoordination,SCHEMA as PEER_SCHEMA
+
+class AgentStore(PeerCoordination):
     # Only implemented types; each agent must explicitly claim local support.
     remote_kinds=("tcp","tls","http","route")
 
@@ -49,7 +51,7 @@ class AgentStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3):
+            if version not in (0,1,2,3,4):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -108,6 +110,9 @@ class AgentStore:
                 PRAGMA user_version=3;
                 COMMIT;
                 """)
+
+            if version<4:
+                c.executescript("BEGIN IMMEDIATE;"+PEER_SCHEMA+"PRAGMA user_version=4;COMMIT;")
 
     def capability_list(self):
         with self.db() as c:
@@ -182,6 +187,7 @@ class AgentStore:
 
     def expire(self,c):
         now=self.clock()
+        self.peer_expire(c,now)
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='leased' AND lease_until<=?",(now,now))
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='queued' AND created<=?",(now,now-86400))
         c.execute("""UPDATE tasks SET state='interrupted',finished=? WHERE state='queued' AND id IN (
@@ -209,6 +215,7 @@ class AgentStore:
                 raise AgentError(404,"Active agent not found")
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
+            self.peer_invalidate(c,id)
             self.audit(c,id,"revoked")
 
     def rotate(self,id):
@@ -219,6 +226,7 @@ class AgentStore:
                 raise AgentError(404,"Active agent not found")
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
+            self.peer_invalidate(c,id)
             self.audit(c,id,"rotated")
         return {"id":id,"token":token,"expires_at":self.clock()+600}
 
@@ -229,7 +237,7 @@ class AgentStore:
             self.expire(c)
             if not c.execute("SELECT 1 FROM agents WHERE id=? AND revoked=0 AND credential IS NOT NULL",(id,)).fetchone():
                 raise AgentError(404,"Enrolled agent not found")
-            if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+            if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]+int(self.peer_reserved(c,id))>=4:
                 raise AgentError(409,"Agent queue full")
             if c.execute("SELECT count(*) FROM tasks").fetchone()[0]>=10000:
                 raise AgentError(409,"Task history capacity reached")
@@ -255,7 +263,7 @@ class AgentStore:
             cap=c.execute("SELECT capabilities,reported_at FROM agent_capabilities WHERE agent_id=?",(id,)).fetchone()
             if not cap or not 0<=self.clock()-cap["reported_at"]<CAPABILITY_TTL or cfg.kind not in json.loads(cap["capabilities"]):
                 raise AgentError(409,"Fresh matching agent capability required")
-            if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+            if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]+int(self.peer_reserved(c,id))>=4:
                 raise AgentError(409,"Agent queue full")
             if c.execute("SELECT count(*) FROM tasks").fetchone()[0]>=10000:
                 raise AgentError(409,"Task history capacity reached")
@@ -309,7 +317,7 @@ class AgentStore:
                 cap=c.execute("SELECT capabilities,reported_at FROM agent_capabilities WHERE agent_id=?",(id,)).fetchone()
                 if not cap or not 0<=now-cap["reported_at"]<CAPABILITY_TTL or cfg.kind not in json.loads(cap["capabilities"]):
                     raise AgentError(409,"Fresh matching capability required for every agent")
-                if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+                if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]+int(self.peer_reserved(c,id))>=4:
                     raise AgentError(409,"Selected agent queue full")
             c.execute("INSERT INTO batches VALUES(?,?,?,?)",(body.request_id,now,encoded,fingerprint))
             c.execute("INSERT INTO remote_batch_policy VALUES(?,?)",(body.request_id,now+DISPATCH_WINDOW))
@@ -373,7 +381,7 @@ class AgentStore:
             for id in ids:
                 if not c.execute("SELECT 1 FROM agents WHERE id=? AND revoked=0 AND credential IS NOT NULL",(id,)).fetchone():
                     raise AgentError(404,"Selected agent is not enrolled")
-                if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+                if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]+int(self.peer_reserved(c,id))>=4:
                     raise AgentError(409,"Selected agent queue full")
             now=self.clock()
             c.execute("INSERT INTO batches VALUES(?,?,?,?)",(body.request_id,now,config,fingerprint))
@@ -422,6 +430,7 @@ class AgentStore:
             return {"cancelled":n}
 
     def lease_dns(self,c,id):
+        if self.peer_reserved(c,id):return None
         if c.execute("SELECT 1 FROM tasks WHERE agent_id=? AND state='leased'",(id,)).fetchone():
             return None
         r=c.execute("""SELECT * FROM tasks WHERE agent_id=? AND state='queued'
@@ -438,6 +447,7 @@ class AgentStore:
             self.expire(c)
             c.execute("UPDATE agents SET last_seen=?,engine=? WHERE id=?",(self.clock(),heartbeat.engine,id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
+            self.peer_invalidate(c,id)
             return {"task":self.lease_dns(c,id)}
 
     def poll_v2(self,credential,body):
@@ -455,6 +465,7 @@ class AgentStore:
             return {"version":PROTOCOL_V2,"dispatchable":list(self.supported_kinds()),"task":task}
 
     def lease_v2(self,c,id,claims):
+        if self.peer_reserved(c,id):return None
         if c.execute("SELECT 1 FROM tasks WHERE agent_id=? AND state='leased'",(id,)).fetchone():return None
         for r in c.execute("SELECT * FROM tasks WHERE agent_id=? AND state='queued' ORDER BY created,id",(id,)).fetchall():
             if r["probe_kind"] not in claims:continue
