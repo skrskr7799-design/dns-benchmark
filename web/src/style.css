@@ -108,3 +108,5 @@ main{position:relative;max-width:none;padding:26px clamp(18px,2.1vw,34px);backgr
 }
 @keyframes drawer-enter{from{transform:translateX(-100%)}to{transform:translateX(0)}}
 @media(prefers-reduced-motion:reduce){.sidebar.nav-open .nav-content{animation:none}}
+
+.twin-topology{min-width:0}.twin-canvas-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:8px;background:#0B1319}.twin-canvas{position:relative;width:640px;min-width:640px;background-image:radial-gradient(#293A44 1px,transparent 1px);background-size:20px 20px}.twin-canvas svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}.twin-graph-node.secondary{position:absolute;width:176px;height:72px;padding:7px 10px;gap:2px;overflow:hidden}.twin-graph-node b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}.twin-graph-node small,.twin-graph-node span{font-size:11px}.twin-topology .controls{margin-top:10px;align-items:center}

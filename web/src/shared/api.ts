@@ -103,10 +103,13 @@ export interface DNSSECConfig {endpoint:string;family:'ipv4'|'ipv6';positive:{na
 export interface DNSSECCheck {endpoint:string;vantage:string;started_at:number;finished_at:number;behavior:string;checks:{control:string;name:string;checking_disabled_requested:boolean;expected_answer:boolean;response:InspectionResult}[];signature:{status:string;key_tag:number|null};chain_validated:boolean;limitations:string[]}
 export interface LabConfig {endpoints:string[];max_queries:number;max_seconds:number;max_parallel:number;max_count:number;corpus:string[];warmup:string}
 export interface LabProfile {endpoints:string[];families:('ipv4'|'ipv6')[];modes:('cold'|'warm')[];count:number;parallel:1|2}
-export interface LabResult {methodology:string;profile:LabProfile;profile_key:string|null;vantage:string;status:'completed'|'deadline';started_at:number;finished_at:number;planned_queries:number;rows:(Result&{family:string;expected_protocol:string;transport_matched:boolean;samples:Sample[];warmup:{ok:boolean;error:string|null}|null})[];comparisons:{endpoint:string;family:string;status:string;warm_minus_cold_p50_ms:number|null}[];limitations:string[]}
+export interface HistoryMarker {history_id?:string|null;history_status?:'saved'|'not_saved'|'not_requested'}
+export interface ExperimentSummary {id:string;kind:'protocol_lab'|'website_xray';created:number;hash:string;size:number;status:string}
+export interface ExperimentDetail extends Omit<ExperimentSummary,'status'> {report:LabResult|XRayReport}
+export interface LabResult extends HistoryMarker {methodology:string;profile:LabProfile;profile_key:string|null;vantage:string;status:'completed'|'deadline';started_at:number;finished_at:number;planned_queries:number;rows:(Result&{family:string;expected_protocol:string;transport_matched:boolean;samples:Sample[];warmup:{ok:boolean;error:string|null}|null})[];comparisons:{endpoint:string;family:string;status:string;warm_minus_cold_p50_ms:number|null}[];limitations:string[]}
 export interface AtlasReport {target:string;family:string;resolved_ip:string|null;asn:number|null;started_at:number;finished_at:number;data:Record<string,{retrieved_at:number;value:Record<string,unknown>}>;errors:Record<string,string>;cached:boolean;limitations:string[]}
 export interface XRayHop extends NetworkProbe {url:string;selected_headers?:Record<string,string[]>;header_presence?:string[]}
-export interface XRayReport {request:{url:string;family:string;follow_redirects:boolean};started_at:number;finished_at:number;status:string;hops:XRayHop[];limitations:string[]}
+export interface XRayReport extends HistoryMarker {request:{url:string;family:string;follow_redirects:boolean};started_at:number;finished_at:number;status:string;hops:XRayHop[];limitations:string[]}
 export interface TwinNode {id:string;name:string;kind:'device'|'service'|'site'|'resolver'|'gateway'|'agent';monitor_id:string|null}
 export interface TwinEdge {source:string;target:string;kind:'requires'|'uses'|'located_at'}
 export interface TwinGraph {nodes:TwinNode[];edges:TwinEdge[]}
@@ -121,6 +124,10 @@ export interface ScenarioResult extends ScenarioRun {result:{status:string;obser
 export interface ChaosProfile {seed:number;samples:number;baseline_ms:number;delay_ms:number;loss_pct:number;dns:'normal'|'servfail'|'timeout';timeout_ms:number}
 export interface ChaosResult {status:string;methodology:string;profile:ChaosProfile;rows:{index:number;outcome:string;modeled_ms:number|null}[];counts:Record<string,number>;baseline_success:number;limitations:string[]}
 export const api = {
+  experimentHistory:(kind:ExperimentSummary['kind'],signal?:AbortSignal)=>request<ExperimentSummary[]>('/api/v1/intelligence/experiments?kind='+kind,{signal}),
+  experimentDetail:(id:string,signal?:AbortSignal)=>request<ExperimentDetail>('/api/v1/intelligence/experiments/'+encodeURIComponent(id),{signal}),
+  experimentDelete:(id:string)=>request<{deleted:boolean}>('/api/v1/intelligence/experiments/'+encodeURIComponent(id),{method:'DELETE'}),
+
   scenario:(signal?:AbortSignal)=>request<ScenarioModel|null>('/api/v1/intelligence/scenario',{signal}),
   scenarioSave:(body:{request_id:string;expected_revision:number;definition:ScenarioDefinition})=>request<ScenarioModel>('/api/v1/intelligence/scenario',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
   scenarioRuns:(signal?:AbortSignal)=>request<ScenarioRun[]>('/api/v1/intelligence/scenario/runs',{signal}),
@@ -134,10 +141,10 @@ export const api = {
 
   atlasConfig:(signal?:AbortSignal)=>request<{enabled:boolean;providers:string[];cache_seconds:number}>('/api/v1/intelligence/atlas',{signal}),
   atlasLookup:(body:{target:string;family:'ipv4'|'ipv6'})=>request<AtlasReport>('/api/v1/intelligence/atlas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
-  xray:(body:{url:string;family:'ipv4'|'ipv6';follow_redirects:boolean})=>request<XRayReport>('/api/v1/intelligence/website-xray',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  xray:(body:{url:string;family:'ipv4'|'ipv6';follow_redirects:boolean},save=false)=>request<XRayReport>('/api/v1/intelligence/website-xray?save='+save,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
 
   labConfig:(signal?:AbortSignal)=>request<LabConfig>('/api/v1/intelligence/protocol-lab',{signal}),
-  labRun:(body:LabProfile)=>request<LabResult>('/api/v1/intelligence/protocol-lab',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  labRun:(body:LabProfile,save=false)=>request<LabResult>('/api/v1/intelligence/protocol-lab?save='+save,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
 
   integrityAgreement:(config:{name:string;qtype:string;endpoints:string[];family:'ipv4'|'ipv6'})=>request<IntegrityAgreement>('/api/v1/intelligence/dns/integrity/agreement',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   integrityDNSSEC:(config:DNSSECConfig)=>request<DNSSECCheck>('/api/v1/intelligence/dns/integrity/dnssec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),

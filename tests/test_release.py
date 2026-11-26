@@ -11,6 +11,7 @@ from backend.ndc.evidence import EvidenceStore
 from backend.ndc.benchmark_evidence import BenchmarkDrain
 from backend.ndc.network_twin import TwinStore,Save as TwinSave
 from backend.ndc.scenario import ScenarioStore,Save as ScenarioSave,Run as ScenarioRun
+from backend.ndc.experiment_history import ExperimentHistory
 from unittest.mock import patch as env_patch
 
 CFG={"endpoints":["udp://127.0.0.1"],"count":1,"mode":"cold","family":"ipv4","parallel":1}
@@ -61,6 +62,8 @@ class ReleaseTests(unittest.TestCase):
         scenarios=ScenarioStore(self.data/"scenarios.sqlite");scenarios.initialize()
         scenario=scenarios.save(ScenarioSave(request_id="c"*32,expected_revision=0,definition={"name":"fixture","twin_revision":1,"steps":[{"id":"a","action":"twin_state","target":"b"*32}]}),twin,set())
         execution=scenarios.run(ScenarioRun(request_id="d"*32,revision=1,dry_run=True),twin,None,None)
+        experiments=ExperimentHistory(self.data/"experiments.sqlite");experiments.initialize()
+        exp=experiments.save("protocol_lab",{"status":"completed","rows":[]})
         dest=self.root/"backup"
         with open(self.data/"coordinator.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -76,7 +79,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(restored_scenarios.latest(),scenario)
         self.assertEqual(restored_scenarios.get_run("d"*32),execution)
         self.assertEqual(restored_scenarios.run(ScenarioRun(request_id="d"*32,revision=1,dry_run=True),restored_twin,None,None),execution)
-        for name in ("twin.sqlite","scenarios.sqlite"):
+        restored_experiments=ExperimentHistory(restored/"experiments.sqlite");restored_experiments.initialize()
+        self.assertEqual(restored_experiments.get(exp),experiments.get(exp))
+        for name in ("twin.sqlite","scenarios.sqlite","experiments.sqlite"):
             self.assertEqual((restored/name).stat().st_mode&0o777,0o600)
         self.assertEqual((restored/"owner-password").stat().st_mode&0o777,0o600)
         self.assertEqual((restored/"owner-account.json").stat().st_mode&0o777,0o600)

@@ -14,6 +14,7 @@ from backend.ndc.evidence_drain import EvidenceDrain
 from backend.ndc.snapshot_schedule import Schedules
 from backend.ndc.network_twin import TwinStore
 from backend.ndc.scenario import ScenarioStore
+from backend.ndc.experiment_history import ExperimentHistory
 from backend.ndc.jobs import Coordinator
 from backend.ndc.api import router, inspection_slot
 from backend.ndc.monitoring import MonitorStore, MonitorScheduler, Telegram
@@ -40,6 +41,8 @@ async def lifespan(app):
         app.state.twin.initialize()
         app.state.scenarios=ScenarioStore(store.path.with_name('scenarios.sqlite'))
         app.state.scenarios.initialize()
+        app.state.experiments=ExperimentHistory(store.path.with_name('experiments.sqlite'))
+        app.state.experiments.initialize()
         coordinator=Coordinator(store)
         app.state.store=store
         app.state.coordinator=coordinator

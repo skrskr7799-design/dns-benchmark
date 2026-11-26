@@ -17,6 +17,7 @@ from .web_xray import XRayRequest,run as xray_run
 from .network_twin import Save as TwinSave,report as twin_report
 from .scenario import Save as ScenarioSave,Run as ScenarioRun
 from .chaos_lab import Experiment,run as chaos_run
+from .experiment_history import optionally_save
 import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
@@ -43,10 +44,10 @@ def protocol_lab_config():
     except (ValueError,TypeError):raise HTTPException(409,"Invalid laboratory configuration") from None
 
 @router.post("/protocol-lab")
-def protocol_lab_run(body:LabProfile):
+def protocol_lab_run(request:Request,body:LabProfile,save:bool=False):
     if not inspection_slot.acquire(blocking=False):
         raise HTTPException(409,"Network inspection already running")
-    try:return lab_run(body)
+    try:return optionally_save(request.app.state.experiments,'protocol_lab',lab_run(body),save)
     except PermissionError:raise HTTPException(403,"Endpoint not authorized for laboratory") from None
     except (ValueError,RuntimeError):raise HTTPException(409,"Laboratory unavailable") from None
     finally:inspection_slot.release()
@@ -64,11 +65,27 @@ def atlas_lookup(body:AtlasRequest):
     finally:inspection_slot.release()
 
 @router.post("/website-xray")
-def website_xray(body:XRayRequest):
+def website_xray(request:Request,body:XRayRequest,save:bool=False):
     if not inspection_slot.acquire(blocking=False):raise HTTPException(409,"Network inspection already running")
-    try:return xray_run(body)
+    try:return optionally_save(request.app.state.experiments,'website_xray',xray_run(body),save)
     except (ValueError,RuntimeError):raise HTTPException(409,"Website X-Ray unavailable") from None
     finally:inspection_slot.release()
+
+@router.get("/experiments")
+def experiment_history(request:Request,kind:Literal["protocol_lab","website_xray"]):
+    return request.app.state.experiments.list(kind)
+
+@router.get("/experiments/{id}")
+def experiment_detail(request:Request,id:str):
+    try:r=request.app.state.experiments.get(id)
+    except Conflict:raise HTTPException(409,"Report checksum mismatch") from None
+    if r is None:raise HTTPException(404,"Experiment report not found")
+    return r
+
+@router.delete("/experiments/{id}")
+def experiment_delete(request:Request,id:str):
+    if not request.app.state.experiments.delete(id):raise HTTPException(404,"Experiment report not found")
+    return {"deleted":True}
 
 @router.get("/twin")
 def twin(request:Request,revision:int|None=Query(None,ge=0,le=128)):

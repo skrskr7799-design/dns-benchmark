@@ -81,6 +81,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_bounded_worker.py
       - name: Inspection lane reservation and concurrent admission
         run: docker exec -i benchmark python - < tests/test_inspection_gate.py
+      - name: Experiment history opt-in, capacity and integrity
+        run: docker exec -i benchmark python - < tests/test_experiment_history.py
       - name: Network Twin revisions, monitor binding and cycle-safe impact
         run: docker exec -i benchmark python - < tests/test_network_twin.py
       - name: Scenario DAG revisions and disposable synthetic fault worker
