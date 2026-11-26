@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test'
-const screens=[['/','overview','Network overview'],['/benchmark','benchmark','DNS Benchmark'],['/providers','providers','DNS Providers'],['/intelligence','intelligence','DNS Intelligence'],['/observatory','observatory','Network Observatory'],['/time-machine','time-machine','Network Time Machine'],['/global','global','Global Intelligence'],['/inspector','inspector','DNS Inspector'],['/connectivity','connectivity','Connectivity'],['/tls','tls','TLS Inspector'],['/routes','routes','Route Analyzer'],['/diagnostics','diagnostics','Smart Diagnostics'],['/monitoring','monitoring','Monitoring'],['/history','history','История'],['/agents','agents','Agents'],['/integrations','integrations','Integrations'],['/settings','settings','Settings']]
+const screens=[['/','overview','Network overview'],['/benchmark','benchmark','DNS Benchmark'],['/providers','providers','DNS Providers'],['/intelligence','intelligence','DNS Intelligence'],['/observatory','observatory','Network Observatory'],['/time-machine','time-machine','Network Time Machine'],['/global','global','Global Intelligence'],['/dns-integrity','dns-integrity','DNS Integrity & Privacy'],['/inspector','inspector','DNS Inspector'],['/connectivity','connectivity','Connectivity'],['/tls','tls','TLS Inspector'],['/routes','routes','Route Analyzer'],['/diagnostics','diagnostics','Smart Diagnostics'],['/monitoring','monitoring','Monitoring'],['/history','history','История'],['/agents','agents','Agents'],['/integrations','integrations','Integrations'],['/settings','settings','Settings']]
 const sizes=[[1536,1024],[1536,864],[768,1024],[390,844],[320,800]]
 test('Obsidian responsive matrix',async({page},info)=>{
  test.setTimeout(360000)
@@ -58,6 +58,10 @@ test('Obsidian responsive matrix',async({page},info)=>{
  const nodes=['London fixture','Berlin fixture','Helsinki fixture'].map((name,i)=>({id:String(i+1).repeat(32),name,location:'Fixture site '+(i+1),revoked:0,enrolled:1,online:i!==2,last_seen:1764000000,engine:'python-dns02',enroll_until:null}))
  await page.route('**/api/v1/agents',r=>r.fulfill({json:{agents:nodes,tasks:[]}}))
  await page.route('**/api/v1/agents/batches',r=>r.fulfill({json:[]}))
+ await page.route('**/api/v1/intelligence/dns/integrity/agreement',r=>{
+  const b=r.request().postDataJSON();expect(b.name).toBe('example.test');expect(b.endpoints).toEqual(['udp://192.0.2.1','udp://192.0.2.2'])
+  return r.fulfill({json:{name:'example.test.',qtype:'A',family:'ipv4',vantage:'controller',started_at:1764000000,finished_at:1764000001,comparable:2,groups:2,agreement:false,limitations:[],results:b.endpoints.map((endpoint:string,i:number)=>({endpoint,ip:'192.0.2.'+(i+1),peer_ip:'192.0.2.'+(i+1),protocol:'udp',rcode:'NOERROR',outcome:'answer',dnssec:{ad:false},comparison_group:i+1,answer:[{type:'A',values:['198.51.100.'+(i+1)]}]}))}})
+ })
  await page.route('**/api/v1/agents/remote-batches',r=>r.fulfill({json:[]}))
  await page.route('**/api/v1/agents/capabilities',r=>r.fulfill({json:{agents:nodes.map(n=>({id:n.id,fresh:true,dispatchable:['tcp']}))}}))
  let peerRequestId=''
@@ -156,6 +160,12 @@ test('Obsidian responsive matrix',async({page},info)=>{
    await expect(launch).toBeDisabled()
    await capture('global-launch')
   }
+  await page.goto('/#/dns-integrity')
+  await page.getByLabel('Имя DNS',{exact:true}).fill('example.test')
+  await page.getByLabel('Резолверы (2–4, по одному в строке)',{exact:true}).fill('udp://192.0.2.1\nudp://192.0.2.2')
+  await page.getByRole('button',{name:'Сравнить ответы',exact:true}).click()
+  await expect(page.getByText('Различаются',{exact:true})).toBeVisible()
+  await capture('dns-integrity')
   await page.goto('/#/integrations')
   await page.getByRole('button',{name:'Обновить статистику',exact:true}).click()
   await expect(page.getByText('12345',{exact:true})).toBeVisible()

@@ -20,8 +20,8 @@ def signature(response,qtype):
          tuple(sorted(r.to_digestable() for r in rr)))
         for rr in response.answer if rr.rdtype!=dns.rdatatype.RRSIG or qtype=='RRSIG')))
 
-def inspect_one(endpoint,config):
-    ip,bootstrap_ms,error=bootstrap(endpoint,config.family)
+def inspect_one(endpoint,config,*,pinned=None):
+    ip,bootstrap_ms,error=pinned if pinned is not None else bootstrap(endpoint,config.family)
     out={"endpoint":endpoint,"ip":ip,"bootstrap_ms":bootstrap_ms,
          "duration_ms":None,"protocol":None,"peer_ip":None,"error":error,
          "rcode":None,"flags":[],"edns":None,"dnssec":None,

@@ -71,6 +71,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_transports.py
       - name: DNS inspector semantics
         run: docker exec -i benchmark python - < tests/test_inspector.py
+      - name: DNS Integrity controls and independent pinned RRset signature
+        run: docker exec -i benchmark python - < tests/test_dns_integrity.py
       - name: Connectivity and TLS integration
         run: docker exec -i benchmark python - < tests/test_network.py
       - name: Route analyzer integration

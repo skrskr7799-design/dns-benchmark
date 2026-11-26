@@ -98,7 +98,13 @@ export type GlobalPeerPlan={request_id:string;direction:GlobalDirection;samples:
 export type GlobalRemoteKind='tcp'|'tls'|'http'|'route'
 export interface GlobalRemoteRequest {request_id:string;agent_ids:string[];config:{kind:GlobalRemoteKind;host:string;port:number;family:'ipv4'|'ipv6';scheme?:'http'|'https';path?:string;max_hops?:number}}
 export interface GlobalCapabilities {agents:{id:string;fresh:boolean;dispatchable:string[]}[]}
+export interface IntegrityAgreement {name:string;qtype:string;family:string;vantage:string;started_at:number;finished_at:number;comparable:number;groups:number;agreement:boolean|null;results:InspectionResult[];limitations:string[]}
+export interface DNSSECConfig {endpoint:string;family:'ipv4'|'ipv6';positive:{name:string;expected_ipv4:string};bogus:{name:string;expected_ipv4:string};anchor:{signer:string;dnskey:string}|null}
+export interface DNSSECCheck {endpoint:string;vantage:string;started_at:number;finished_at:number;behavior:string;checks:{control:string;name:string;checking_disabled_requested:boolean;expected_answer:boolean;response:InspectionResult}[];signature:{status:string;key_tag:number|null};chain_validated:boolean;limitations:string[]}
 export const api = {
+  integrityAgreement:(config:{name:string;qtype:string;endpoints:string[];family:'ipv4'|'ipv6'})=>request<IntegrityAgreement>('/api/v1/intelligence/dns/integrity/agreement',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
+  integrityDNSSEC:(config:DNSSECConfig)=>request<DNSSECCheck>('/api/v1/intelligence/dns/integrity/dnssec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
+
   globalCapabilities:(signal?:AbortSignal)=>request<GlobalCapabilities>('/api/v1/agents/capabilities',{signal}),
   launchGlobalPeer:(kind:'rtt'|'goodput',plan:GlobalPeerPlan)=>request<{id:string;duplicate:boolean}>('/api/v1/agents/'+(kind==='rtt'?'peer-requests':'goodput-requests'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(plan)}),
   launchGlobalBatch:(body:GlobalRemoteRequest)=>request<{id:string;duplicate:boolean}>('/api/v1/agents/remote-batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),

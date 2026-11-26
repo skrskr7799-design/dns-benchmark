@@ -10,11 +10,26 @@ from pydantic import BaseModel,ConfigDict,Field
 from .dns_cohorts import aggregate,NarrowQuery
 from .dns_intelligence import rank
 from .observatory import analyze
+from .dns_integrity import Agreement,DNSSECCheck,agreement,dnssec_check
 import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
 EvidenceKind=Literal["observations","events"]
 MAX_SEQ=9223372036854775807
+
+@router.post("/dns/integrity/agreement")
+def integrity_agreement(body:Agreement):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"Network inspection already running")
+    try:return agreement(body)
+    finally:inspection_slot.release()
+
+@router.post("/dns/integrity/dnssec")
+def integrity_dnssec(body:DNSSECCheck):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"Network inspection already running")
+    try:return dnssec_check(body)
+    finally:inspection_slot.release()
 
 @router.get("/dns/cohorts")
 def dns_cohorts(request:Request,since:float=Query(...,ge=0,le=253402300799),

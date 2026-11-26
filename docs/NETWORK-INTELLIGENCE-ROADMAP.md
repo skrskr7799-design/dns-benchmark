@@ -129,4 +129,5 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05C1 | backend/API passed / visual CI failed (45775704394) | owner launch and cancellation forms, bounded matrix, retry fixture |
 | NIP-05C2a | implemented candidate / CI pending | accessible launch labels, bounded claim refresh, rotated peer priority |
 | NIP-05C2b | planned | active-session load, RTT cancellation/restart hardening and physical acceptance |
-| NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-06A/B | implemented candidate / CI pending | resolver agreement, controlled DNSSEC behavior, pinned-key signature check and UI; no root-chain or client leak claim |
+| NIP-06C, NIP-07..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

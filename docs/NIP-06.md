@@ -1,0 +1,12 @@
+# NIP-06 — DNS Integrity & Privacy
+
+Candidate, descendant of b352275 while its CI is in progress. NIP-05C2b remains open: active control load and RTT cancellation/restart hardening, physical acceptance. No main merge.
+
+## Implemented scope
+- Owner-authenticated POST endpoints use the existing single interactive inspection semaphore and scoped DNS transport. Agreement: 2–4 distinct configured resolver endpoints, one query each, one selected family, DO enabled, no implicit fallback; compare observed eligible answer groups ignoring TTL and order; transport failures, SERVFAIL, truncation and referrals excluded. No filtering/hijacking verdict or privacy ranking.
+- Controlled DNSSEC: one resolver, one pinned bootstrap IP, three sequential A queries (positive, bogus with CD clear, bogus with CD set), operator supplies both expected addresses. "Consistent with validation" requires expected positive with AD, bogus SERVFAIL, expected CD answer. Expected bogus answer with CD clear is observed behavior, not proof of a compromise. All other patterns inconclusive. No default external test domain or traffic.
+- Optional independent RRset signature verification with an explicitly supplied public DNSKEY and signer name, matching RRSIG key tag/owner/type, using dnspython cryptography and current controller time. Valid only under supplied key; not independently established trust chain, no denial-of-existence validation. Missing signature, unsupported crypto, expired/tampered signature are not success. No private keys requested.
+- Responsive Obsidian Signature workspace with actual API data, explicit controller/container vantage and privacy boundary. Tests include signed ECDSA RRset and tamper/expiry, negative controls and comparison exclusions; fixture browser captures.
+
+## Remaining
+Real controlled authoritative DNS fixture with valid/bogus zone, resource measurement of worst-case existing per-query timeout and bootstrap, complete trust-chain validation if feasible with independently maintained anchors, split DNS across different agent/client vantages and separately consented client DNS leak test with owned authoritative zone and explicit data retention. No privacy score, browser leak test, automatic configuration changes or external zone integration. Existing scoped transport timeouts apply, no claim of hard end-to-end deadline. No persistent evidence storage yet. CI pending.
