@@ -15,6 +15,27 @@ from .peer_contract import PeerDirection,RTTPlan,LocalGrants
 from .peer_transport import Receiver,measure,credentials,checked_ip
 
 MAX_LOCAL_IDS=2048
+CLAIM_REFRESH_SECONDS=12
+PEER_IDLE_SECONDS=4
+
+class ClaimRefresh:
+    """Rate-bound successful and disabled claim refreshes; never cache credentials."""
+    def __init__(self,clock=time.monotonic):
+        self.clock=clock;self.next_at=None;self.enabled=False
+
+    def refresh(self,post,body):
+        now=self.clock()
+        if self.next_at is not None and now<self.next_at:return self.enabled
+        response=post('claims',body)
+        if response.status_code==409:
+            self.enabled=False
+        else:
+            response.raise_for_status();self.enabled=True
+        self.next_at=self.clock()+CLAIM_REFRESH_SECONDS
+        return self.enabled
+
+    def invalidate(self):
+        self.next_at=None;self.enabled=False
 
 def private_regular(path,limit,private=True):
     st=path.lstat()
@@ -70,6 +91,7 @@ class Journal:
 class PeerRuntime:
     def __init__(self,root,agent_id,post,atomic):
         self.root=Path(root);self.agent_id=agent_id;self.post=post
+        self.claim_refresh=ClaimRefresh()
         path=self.root/"peer-directions.json"
         private_regular(path,65536)
         rows=json.loads(path.read_text())
@@ -106,8 +128,11 @@ class PeerRuntime:
 
     def step(self):
         if not self.flush():return True
-        self.call("claims",{"directions":[d.model_dump(mode="json") for d in self.approvals]})
-        offer=self.call("offer",{})["offer"]
+        if not self.claim_refresh.refresh(self.post,{"directions":[d.model_dump(mode="json") for d in self.approvals]}):return False
+        response=self.post("offer",{})
+        if response.status_code==409:
+            self.claim_refresh.invalidate();return False
+        response.raise_for_status();offer=response.json()["offer"]
         if offer is None:return False
         id=offer["id"];role=offer["role"]
         if role not in ("receiver","source"):raise ValueError("Unknown peer role")

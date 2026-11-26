@@ -126,6 +126,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05A4c2b2 | implemented / CI passed (45772037144) | internal session leases, quarantine, exact receipt reconciliation and evidence |
 | NIP-05A4c2b3 | implemented / CI passed (45772249210) | opt-in owner/machine API, sequential agent execution and end-to-end fixture |
 | NIP-05B | implemented / CI passed (45772553347) | Global Intelligence workspace, bounded directional matrix and remote comparison |
-| NIP-05C1 | implemented candidate / CI pending | owner launch and cancellation forms, bounded matrix, retry fixture |
-| NIP-05C2 | planned | shared machine rate/fairness hardening and physical acceptance |
+| NIP-05C1 | backend/API passed / visual CI failed (45775704394) | owner launch and cancellation forms, bounded matrix, retry fixture |
+| NIP-05C2a | implemented candidate / CI pending | accessible launch labels, bounded claim refresh, rotated peer priority |
+| NIP-05C2b | planned | active-session load, RTT cancellation/restart hardening and physical acceptance |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

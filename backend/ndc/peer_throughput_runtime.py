@@ -10,7 +10,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from .peer_runtime import private_regular, MAX_LOCAL_IDS, Journal
+from .peer_runtime import private_regular, MAX_LOCAL_IDS, Journal, ClaimRefresh
 from .peer_transport import checked_ip, credentials
 from .peer_throughput import (ThroughputPolicy, ThroughputPlan, ThroughputGrants,
     ThroughputReceiver, measure_throughput, MAX_BYTES)
@@ -164,6 +164,7 @@ class GoodputAgentRuntime:
         from .peer_api import GoodputFinish
         self.local=ThroughputRuntime(root,agent_id,atomic)
         self.agent_id=agent_id;self.post=post
+        self.claim_refresh=ClaimRefresh()
         self.journal=Journal(Path(root)/"goodput-journal.json",atomic,GoodputFinish)
 
     def call(self,path,body):
@@ -182,10 +183,11 @@ class GoodputAgentRuntime:
     def step(self):
         from .peer_api import Leased,RequestID,Ready
         if not self.flush():return True
-        claims=self.post("claims",{"policies":[p.model_dump(mode="json") for p in self.local.policies]})
-        if claims.status_code==409:return False  # optional server feature disabled
-        claims.raise_for_status()
-        offer=self.call("offer",{})["offer"]
+        if not self.claim_refresh.refresh(self.post,{"policies":[p.model_dump(mode="json") for p in self.local.policies]}):return False
+        response=self.post("offer",{})
+        if response.status_code==409:
+            self.claim_refresh.invalidate();return False
+        response.raise_for_status();offer=response.json()["offer"]
         if offer is None:return False
         id=RequestID(id=offer["id"]).id;role=offer["role"]
         if role not in ("receiver","source"):raise ValueError("Unknown goodput role")

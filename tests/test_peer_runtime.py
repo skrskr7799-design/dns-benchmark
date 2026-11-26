@@ -181,4 +181,27 @@ class Tests(unittest.TestCase):
             finally:
                 for c in clients:c.close()
 
+    def test_claim_refresh_and_disabled_retry_are_bounded(self):
+        import httpx
+        from backend.ndc.peer_runtime import ClaimRefresh
+        now=[0.];calls=[];status=[200]
+        def post(path,body):
+            calls.append((path,body))
+            return httpx.Response(status[0],request=httpx.Request("POST","https://fixture.test"))
+        refresh=ClaimRefresh(lambda:now[0])
+        for i in range(12):
+            now[0]=float(i)
+            self.assertTrue(refresh.refresh(post,{"directions":[]}))
+        self.assertEqual(len(calls),1)
+        now[0]=12.;status[0]=409
+        self.assertFalse(refresh.refresh(post,{}))
+        now[0]=15.;status[0]=200
+        self.assertFalse(refresh.refresh(post,{}))
+        self.assertEqual(len(calls),2)
+        now[0]=24.
+        self.assertTrue(refresh.refresh(post,{}))
+        refresh.invalidate();status[0]=401
+        with self.assertRaises(httpx.HTTPStatusError):refresh.refresh(post,{})
+        self.assertEqual(len(calls),4)
+
 if __name__=="__main__":unittest.main()

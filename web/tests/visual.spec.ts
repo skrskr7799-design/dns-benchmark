@@ -139,8 +139,9 @@ test('Obsidian responsive matrix',async({page},info)=>{
   await capture('global-goodput')
   if(width===1536){
    await page.getByText('Прямое измерение RTT / Throughput',{exact:true}).click()
-   await page.getByLabel('Источник',{exact:true}).selectOption(nodes[0].id)
-   await page.getByLabel('Получатель',{exact:true}).selectOption(nodes[1].id)
+   await expect(page.getByLabel('Источник',{exact:true})).toBeVisible()
+   await page.getByLabel('Источник',{exact:true}).selectOption(nodes[0].id,{timeout:10000})
+   await page.getByLabel('Получатель',{exact:true}).selectOption(nodes[1].id,{timeout:10000})
    await page.getByLabel('IP источника',{exact:true}).fill('192.0.2.1')
    await page.getByLabel('IP получателя',{exact:true}).fill('192.0.2.2')
    await page.getByLabel('SHA-256 источника',{exact:true}).fill('a'.repeat(64))
@@ -152,6 +153,7 @@ test('Obsidian responsive matrix',async({page},info)=>{
    await expect(page.getByRole('alert')).toContainText('fixture ambiguous response')
    await launch.click()
    await expect(page.getByText('Запрос принят: '+peerRequestId,{exact:true})).toBeVisible()
+   await expect(launch).toBeDisabled()
    await capture('global-launch')
   }
   await page.goto('/#/integrations')

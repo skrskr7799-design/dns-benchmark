@@ -65,6 +65,7 @@ class Agent:
         self.approvals=tuple(approvals)
         self.peer=None
         self.goodput=None
+        self.peer_turn=0
 
     def post(self,path,body,auth=True):
         headers={"Authorization":"Bearer "+self.credential} if auth else {}
@@ -114,8 +115,13 @@ class Agent:
     def step(self):
         if not self.flush():
             return
-        if self.goodput is not None and self.goodput.step():return
-        if self.peer is not None and self.peer.step():return
+        # Rotate peer protocol priority so continuously queued goodput cannot
+        # always precede RTT. Controller reservations still serialize DNS.
+        runtimes=[r for r in (self.goodput,self.peer) if r is not None]
+        if len(runtimes)==2 and self.peer_turn%2:runtimes.reverse()
+        self.peer_turn+=1
+        for runtime in runtimes:
+            if runtime.step():return
         if self.protocol_v2:
             supported={a.config.kind for a in self.approvals if a.config.kind!="route"}
             if any(a.config.kind=="route" for a in self.approvals):
@@ -233,7 +239,7 @@ class Agent:
             while True:
                 try:
                     self.step()
-                    delay=2 if self.peer is not None or self.goodput is not None else 5
+                    delay=4 if self.peer is not None or self.goodput is not None else 5
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code==401:
                         print("Agent authorization rejected; rotate and re-enroll",flush=True)
