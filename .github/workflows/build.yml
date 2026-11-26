@@ -74,7 +74,19 @@ jobs:
           writeFileSync(d+"/compose.yaml",yaml,{mode:0o600});
           JS
           trap 'docker compose -f "$dir/compose.yaml" down -v --remove-orphans >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
-          docker compose --profile bootstrap -f "$dir/compose.yaml" config --format json | jq -e '.services.agent.read_only == true and .services.bootstrap.network_mode == "none" and .services.bootstrap.read_only == false and ((.services.agent.configs // [])|length==0) and ((.services.agent.ports // [])|length==0)'
+          docker compose version
+          docker compose --profile bootstrap -f "$dir/compose.yaml" config --format json | jq -e '
+            {
+              agent_read_only: (.services.agent.read_only == true),
+              bootstrap_offline: (.services.bootstrap.network_mode == "none"),
+              bootstrap_writable: ((.services.bootstrap.read_only // false) == false),
+              agent_no_inline_config: (((.services.agent.configs // [])|length)==0),
+              agent_no_ports: (((.services.agent.ports // [])|length)==0),
+              bootstrap_has_config: (((.services.bootstrap.configs // [])|length)==1),
+              bootstrap_opt_in: ((.services.bootstrap.profiles // [])|index("bootstrap") != null)
+            } | . as $checks | if all(.[]; . == true) then . else error("Compose policy: "+($checks|tojson)) end'
+          docker compose -f "$dir/compose.yaml" config --services | grep -qx agent
+          if docker compose -f "$dir/compose.yaml" config --services | grep -qx bootstrap; then echo "Bootstrap must be opt-in"; exit 1; fi
           fp=$(jq -r .sha256 "$dir/trust.json")
           if docker compose -f "$dir/compose.yaml" run --rm --no-deps bootstrap verify "$(printf '%064d' 0)"; then echo "Wrong CA accepted"; exit 1; fi
           docker compose -f "$dir/compose.yaml" run --rm --no-deps bootstrap verify "$fp"
