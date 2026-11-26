@@ -20,7 +20,7 @@ test('Time Machine real route and deterministic history comparison',async({page}
   const key=r.request().url().split('/').at(-1)
   if(r.request().method()==='DELETE'){items=items.filter(x=>x.id!==key);return r.fulfill({status:204})}
   const item=items.find(x=>x.id===key)
-  return item?r.fulfill({json:{...item,snapshot:{scope:item.scope,methodology:'probe-snapshot-v1',target:{name:'example.com.'},observation:{rrsets:[{values:['192.0.2.2']}]},limitations:[]}}}):r.fulfill({status:404,json:{detail:'not found'}})
+  return item?r.fulfill({json:{...item,snapshot:{scope:item.scope,methodology:'probe-snapshot-v1',target:{name:'example.com.'},observation:{resolver_ip:'127.0.0.1',protocol:'udp',answer_complete:true,rrsets:[{name:'example.com.',type:'A',class:'IN',ttl:60,values:['192.0.2.2']}]},limitations:[]}}}):r.fulfill({status:404,json:{detail:'not found'}})
  })
  await page.route(base+'/compare?*',r=>r.fulfill({json:{methodology:'probe-diff-v1',scope:'dns',before_id:id(1),after_id:id(2),changes:[{field:'rrset',key:['example.com.','IN','A'],before:['192.0.2.1'],after:['192.0.2.2'],status:'changed'},{field:'protocol',before:'udp',after:'udp',status:'unchanged'},{field:'rrsets',before:null,after:null,status:'unknown'}],limitations:[]}}))
  await page.route(base+'/schedules',r=>{
@@ -51,7 +51,12 @@ test('Time Machine real route and deterministic history comparison',async({page}
  await page.getByLabel('Только изменения и неизвестные').uncheck()
  await expect(page.locator('.tm-diff-row')).toHaveCount(3)
  await page.getByRole('button',{name:/After/}).click()
- await expect(page.locator('.tm-detail')).toContainText('SHA-256')
+ await expect(page.locator('.tm-record').first()).toBeVisible()
+ await expect(page.locator('.tm-rrset')).toContainText('192.0.2.2')
+ await expect(page.locator('.tm-hash')).not.toBeVisible()
+ await page.getByText('Контрольная сумма и исходные данные',{exact:true}).click()
+ await expect(page.locator('.tm-hash')).toBeVisible()
+ await page.getByText('Контрольная сумма и исходные данные',{exact:true}).click()
  await page.getByRole('button',{name:'По расписанию'}).click()
  await page.getByLabel('Название снимка').fill('Scheduled fixture')
  await page.getByRole('button',{name:'Создать расписание'}).click()

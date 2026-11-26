@@ -115,6 +115,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_snapshot_probes.py
       - name: Scheduled snapshots cadence, restart and shared lane
         run: docker exec -i benchmark python - < tests/test_snapshot_schedule.py
+      - name: Real scheduled TLS rotation and route snapshot acceptance
+        run: docker exec -i benchmark python - < tests/test_time_machine_live.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

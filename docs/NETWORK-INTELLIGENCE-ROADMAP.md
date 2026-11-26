@@ -100,6 +100,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-03C2 | implemented / CI passed (45744665875) | scheduled maintenance, claim recovery, Observatory controls |
 | NIP-04A1 | implemented / CI passed (45745414003) | [immutable monitor snapshots and semantic diff](NIP-04.md) |
 | NIP-04A2 | implemented / CI passed (45745857257) | scoped DNS/TLS/route snapshots and semantic diff |
-| NIP-04A3 | implemented candidate / CI pending | bounded snapshot schedules, shared lane, restart reconciliation |
-| NIP-04B | implemented candidate / CI pending | Time Machine UI, compatible comparison, capture and schedules |
-| NIP-04C..13 | planned | controlled acceptance, visual review and remaining modules; physical budget and shared scheduler hardening remain open |
+| NIP-04A3 | implemented / CI passed (45746425204) | bounded snapshot schedules, shared lane, restart reconciliation |
+| NIP-04B | implemented / CI passed (45746786204) | Time Machine UI, compatible comparison, capture and schedules |
+| NIP-04C1 | implemented candidate / CI pending | real scheduled TLS rotation, restore, loopback route and structured details |
+| NIP-04C2..13 | planned | exact-head acceptance, final visual review and remaining modules; physical budget and shared scheduler hardening remain open |
