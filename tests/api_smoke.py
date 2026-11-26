@@ -299,6 +299,11 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
             claimed=next(a for a in caps["agents"] if a["id"]==invite["id"])
             assert claimed["fresh"] and claimed["dispatchable"]==["dns"] and claimed["version"]=="2"
             assert request("/api/v1/agents")["agents"][0]["online"]
+            remote_body={"request_id":"c"*32,"config":{"kind":"tcp","host":"127.0.0.1","port":443}}
+            remote_path="/api/v1/agents/"+invite["id"]+"/remote-tasks"
+            expect_error(urllib.request.Request(base+remote_path,data=json.dumps(remote_body).encode(),headers={"Content-Type":"application/json","X-CSRF-Token":csrf}),409)
+            assert request("/api/v1/agents/remote-tasks")==[]
+            expect_error(urllib.request.Request(base+"/api/v1/agents/machine/v2/heartbeat",data=json.dumps({"version":"2","engine":"python-network-v2","task_id":"c"*32,"lease":"a"*43}).encode(),headers={"Content-Type":"application/json"}),403)
             request("/api/v1/agents/"+invite["id"]+"/revoke",{})
             assert agent.post("poll",{"version":"1","engine":"python-dns02"}).status_code==401
             assert agent.post("v2/poll",v2_poll_body).status_code==401

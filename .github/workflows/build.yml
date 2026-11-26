@@ -81,6 +81,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_agents.py
       - name: Agent v2 negotiation, legacy lease and migration
         run: docker exec -i benchmark python - < tests/test_agent_v2.py
+      - name: Typed remote TCP contract, admission and result lifecycle
+        run: docker exec -i benchmark python - < tests/test_remote_tasks.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules

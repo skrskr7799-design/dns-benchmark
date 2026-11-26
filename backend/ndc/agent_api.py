@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch, PollV2
 from .agent_store import AgentError
+from .remote_contract import RemoteRequest,RemoteHeartbeat,RemoteResult
 
 router=APIRouter(prefix="/api/v1/agents")
 def call(fn,*args):
@@ -46,6 +47,22 @@ def revoke(request:Request,id:str):
 def enqueue(request:Request,id:str,body:AgentRun):
     return call(store(request).enqueue,id,body)
 
+@router.post("/{id}/remote-tasks",status_code=202)
+def enqueue_remote(request:Request,id:str,body:RemoteRequest):
+    return call(store(request).enqueue_remote,id,body)
+
+@router.get("/remote-tasks")
+def remote_tasks(request:Request):
+    return store(request).remote_tasks()
+
+@router.get("/remote-tasks/{id}")
+def remote_detail(request:Request,id:str):
+    return call(store(request).remote_detail,id)
+
+@router.post("/remote-tasks/{id}/cancel")
+def remote_cancel(request:Request,id:str):
+    return call(store(request).remote_cancel,id)
+
 @router.post("/batches",status_code=202)
 def create_batch(request:Request,body:Batch):
     return call(store(request).batch,body)
@@ -83,6 +100,14 @@ def poll(request:Request,body:Heartbeat):
 @router.post("/machine/v2/poll")
 def poll_v2(request:Request,body:PollV2):
     return call(store(request).poll_v2,credential(request),body)
+
+@router.post("/machine/v2/heartbeat")
+def remote_heartbeat(request:Request,body:RemoteHeartbeat):
+    return call(store(request).remote_heartbeat,credential(request),body)
+
+@router.post("/machine/v2/results/{id}")
+def remote_complete(request:Request,id:str,body:RemoteResult):
+    return call(store(request).complete_remote,credential(request),id,body)
 
 @router.post("/machine/results/{id}")
 def complete(request:Request,id:str,body:Result):

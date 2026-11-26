@@ -10,6 +10,8 @@ import uuid
 from contextlib import contextmanager
 from .agent_contract import ENGINE, VERSION, AgentRun, PROTOCOL_V2, CAPABILITY_TTL, DISPATCHABLE_V2
 from .agent_evidence import records,encode
+from .remote_contract import RemoteTCP,config_key,validate_remote,project_remote
+from .evidence import canonical
 
 class AgentError(Exception):
     def __init__(self,status,message):
@@ -22,6 +24,13 @@ def secret():
     return secrets.token_urlsafe(32)
 
 class AgentStore:
+    # Closed until the corresponding agent execution path is implemented and tested.
+    # Not an environment switch or remotely configurable capability.
+    remote_kinds=()
+
+    def supported_kinds(self):
+        return (*DISPATCHABLE_V2,*self.remote_kinds)
+
     def __init__(self,path,clock=time.time):
         self.path=path;self.clock=clock
         self.max_evidence_pending=10000
@@ -103,10 +112,10 @@ class AgentStore:
                 claims=json.loads(r["capabilities"]) if r["capabilities"] is not None else []
                 r["capabilities"]=claims
                 r["fresh"]=fresh
-                r["dispatchable"]=[k for k in DISPATCHABLE_V2 if fresh and k in claims]
+                r["dispatchable"]=[k for k in self.supported_kinds() if fresh and k in claims]
                 r["provenance"]="agent_claim" if r["version"] is not None else "unreported"
                 output.append(r)
-            return {"server_version":PROTOCOL_V2,"dispatchable":list(DISPATCHABLE_V2),
+            return {"server_version":PROTOCOL_V2,"dispatchable":list(self.supported_kinds()),
                 "capability_ttl_seconds":CAPABILITY_TTL,"agents":output}
 
     def pending_evidence(self):
@@ -215,6 +224,55 @@ class AgentStore:
             self.audit(c,id,"task queued "+task)
         return {"id":task}
 
+    def enqueue_remote(self,id,body):
+        cfg=body.config;task=body.request_id
+        encoded=canonical(cfg.model_dump(mode="json"))
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            agent=c.execute("SELECT 1 FROM agents WHERE id=? AND revoked=0 AND credential IS NOT NULL",(id,)).fetchone()
+            if not agent:raise AgentError(404,"Enrolled agent not found")
+            prior=c.execute("SELECT agent_id,contract_version,probe_kind,config FROM tasks WHERE id=?",(task,)).fetchone()
+            if prior:
+                if tuple(prior)!=(id,"2",cfg.kind,encoded):raise AgentError(409,"Task request ID already used")
+                return {"id":task,"duplicate":True}
+            if cfg.kind not in self.remote_kinds:raise AgentError(409,"Remote probe kind not enabled")
+            cap=c.execute("SELECT capabilities,reported_at FROM agent_capabilities WHERE agent_id=?",(id,)).fetchone()
+            if not cap or not 0<=self.clock()-cap["reported_at"]<CAPABILITY_TTL or cfg.kind not in json.loads(cap["capabilities"]):
+                raise AgentError(409,"Fresh matching agent capability required")
+            if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+                raise AgentError(409,"Agent queue full")
+            if c.execute("SELECT count(*) FROM tasks").fetchone()[0]>=10000:
+                raise AgentError(409,"Task history capacity reached")
+            c.execute("""INSERT INTO tasks(id,agent_id,config,state,created,contract_version,probe_kind)
+                VALUES(?,?,?,'queued',?,'2',?)""",(task,id,encoded,self.clock(),cfg.kind))
+            self.audit(c,id,"remote task queued "+task)
+            return {"id":task,"duplicate":False}
+
+    def remote_tasks(self):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            return [dict(r)|{"config":json.loads(r["config"])} for r in c.execute("""SELECT id,agent_id,config,state,created,finished,contract_version,probe_kind
+                FROM tasks WHERE contract_version='2' ORDER BY created DESC,id DESC LIMIT 200""")]
+
+    def remote_detail(self,id):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            r=c.execute("""SELECT id,agent_id,config,state,created,finished,payload,contract_version,probe_kind
+                FROM tasks WHERE id=? AND contract_version='2'""",(id,)).fetchone()
+            if not r:raise AgentError(404,"Remote task not found")
+            return dict(r)|{"config":json.loads(r["config"]),"payload":json.loads(r["payload"]) if r["payload"] else None}
+
+    def remote_cancel(self,id):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            if not c.execute("""UPDATE tasks SET state='cancelled',finished=?
+                WHERE id=? AND contract_version='2' AND state IN ('queued','leased')""",(self.clock(),id)).rowcount:
+                raise AgentError(409,"Remote task not active")
+            return {"cancelled":True}
+
     def batch(self,body):
         config=body.config.model_dump_json()
         ids=sorted(body.agent_ids)
@@ -309,8 +367,60 @@ class AgentStore:
                 VALUES(?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET
                 version=excluded.version,engine=excluded.engine,capabilities=excluded.capabilities,
                 reported_at=excluded.reported_at""",(id,body.version,body.engine,json.dumps(body.capabilities),now))
-            task=self.lease_dns(c,id) if "dns" in body.capabilities else None
-            return {"version":PROTOCOL_V2,"dispatchable":list(DISPATCHABLE_V2),"task":task}
+            task=self.lease_v2(c,id,body.capabilities)
+            return {"version":PROTOCOL_V2,"dispatchable":list(self.supported_kinds()),"task":task}
+
+    def lease_v2(self,c,id,claims):
+        if c.execute("SELECT 1 FROM tasks WHERE agent_id=? AND state='leased'",(id,)).fetchone():return None
+        for r in c.execute("SELECT * FROM tasks WHERE agent_id=? AND state='queued' ORDER BY created,id",(id,)).fetchall():
+            if r["probe_kind"] not in claims:continue
+            if r["contract_version"]=="1" and r["probe_kind"]=="dns":
+                return self.lease_dns(c,id)
+            if r["contract_version"]!="2" or r["probe_kind"] not in self.remote_kinds:continue
+            cfg=RemoteTCP.model_validate_json(r["config"])
+            if cfg.kind!=r["probe_kind"]:raise AgentError(409,"Invalid stored task contract")
+            lease=secret()
+            c.execute("UPDATE tasks SET state='leased',lease=?,lease_until=? WHERE id=?",(digest(lease),self.clock()+300,r["id"]))
+            return {"id":r["id"],"lease":lease,"lease_seconds":300,"config":cfg.model_dump(mode="json"),
+                "config_key":config_key(cfg),"kind":cfg.kind,"version":PROTOCOL_V2,"engine":"python-network-v2"}
+        return None
+
+    def remote_heartbeat(self,credential,body):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            id=self.identity(c,credential)
+            r=c.execute("""SELECT probe_kind FROM tasks WHERE id=? AND agent_id=? AND lease=? AND
+                contract_version='2' AND state='leased' AND lease_until>?""",
+                (body.task_id,id,digest(body.lease),self.clock())).fetchone()
+            c.execute("UPDATE agents SET last_seen=? WHERE id=?",(self.clock(),id))
+            return {"active":bool(r and r["probe_kind"] in self.remote_kinds)}
+
+    def complete_remote(self,credential,id,body):
+        encoded=canonical(body.model_dump(mode="json",exclude={"lease"}))
+        ph=digest(encoded)
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            agent=self.identity(c,credential)
+            r=c.execute("SELECT * FROM tasks WHERE id=? AND agent_id=? AND lease=?",(id,agent,digest(body.lease))).fetchone()
+            if not r or r["contract_version"]!="2" or r["probe_kind"]!=body.kind:
+                raise AgentError(404,"Remote task not found")
+            if r["state"] in ("completed","failed") and r["payload_hash"]==ph:
+                return {"accepted":True,"duplicate":True}
+            if r["state"]!="leased" or r["lease_until"]<=self.clock():
+                raise AgentError(409,"Lease expired or task already finalized")
+            cfg=RemoteTCP.model_validate_json(r["config"])
+            validate_remote(cfg,body)
+            now=self.clock()
+            record=project_remote(id,agent,cfg,body)
+            c.execute("UPDATE tasks SET state=?,finished=?,payload=?,payload_hash=? WHERE id=?",(body.status,now,encoded,ph,id))
+            if c.execute("SELECT count(*) FROM agent_evidence_outbox").fetchone()[0]>=self.max_evidence_pending:
+                c.execute("""UPDATE agent_evidence_coverage SET dropped_tasks=dropped_tasks+1,
+                    dropped_observations=dropped_observations+1,first_dropped_at=coalesce(first_dropped_at,?),last_dropped_at=?
+                    WHERE singleton=1""",(now,now))
+            else:
+                c.execute("INSERT INTO agent_evidence_outbox(payload) VALUES(?)",(encode((record,)),))
+            c.execute("UPDATE agents SET last_seen=? WHERE id=?",(now,agent))
+            return {"accepted":True,"duplicate":False}
 
     def heartbeat(self,credential,body):
         with self.db() as c:
