@@ -11,3 +11,6 @@ CI 45825583537 passed the real TLS transport test but failed a synthetic v1 migr
 
 ## Third acceptance pass
 CI 45825983994 passed real TLS enrollment, certificate renewal, migration v1 and typed probe tests, but failed the synthetic v2 remote batch fixture (retained new columns). Correct both remaining identified historical fixtures (remote batches and agent evidence). Add read-only public CA/fingerprint CLI, reject unknown machine paths before owner authentication, redact machine validation errors, test old and renewed certificate revocation, CA backup/restore, and the mTLS wizard download. See NETBIRD-AGENTS.md for operator steps. Full CI on this pass and physical NetBird acceptance remain pending. No main merge.
+
+## Browser acceptance correction
+Run 45836985310 passed all executed backend checks and the dedicated mTLS wizard browser test. The eleventh browser login was rejected by the intended ten-attempt limiter (HTTP 429 in controller logs), causing the subsequent integrations test to fail before navigation. Run both agent workspace cases in a single authenticated browser context, reload with the explicit mTLS trust fixture, retain all assertions, and keep production login limits unchanged. Full exact-head CI and physical VPS acceptance pending.

@@ -160,12 +160,12 @@ test('agents workspace creates a batch and shows both sites',async({page})=>{
  await expect(page.getByText('12.00 мс',{exact:true})).toBeVisible()
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-})
-
-test('mTLS agent wizard exports explicit trusted configuration',async({page})=>{
- await login(page)
+ await test.step('mTLS agent wizard exports explicit trusted configuration',async()=>{
+ await page.setViewportSize({width:1280,height:900})
  const ip='https://100.64.0.9:8443',ca='fixture public CA only'
  await page.route('**/api/v1/agents/control-trust',route=>route.fulfill({json:{enabled:true,origin:ip,ca_pem:ca,sha256:'a'.repeat(64)}}))
+ await page.reload()
+ await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()
  await page.getByRole('link',{name:'Agents',exact:true}).click()
  const origin=page.getByRole('textbox',{name:'HTTPS контроллера'})
  await expect(origin).toHaveValue(ip)
@@ -181,6 +181,7 @@ test('mTLS agent wizard exports explicit trusted configuration',async({page})=>{
  expect(content).toBe('NDC_CONTROLLER_URL='+ip+'\nNDC_AGENT_PROTOCOL=2\nNDC_AGENT_MTLS=1\nNDC_AGENT_CA_FILE=/data/controller-ca.pem\n')
  await page.setViewportSize({width:390,height:844})
  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
 })
 
 test('smart diagnostics separates observations from hypotheses',async({page})=>{
