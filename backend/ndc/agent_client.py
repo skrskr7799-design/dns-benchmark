@@ -312,13 +312,13 @@ class Agent:
 
 def main():
     root=Path(os.getenv("NDC_AGENT_DATA","/data"))
-    from .agent_bootstrap import BOOTSTRAP,exists,load,prepare
-    if exists(BOOTSTRAP):
+    from .agent_bootstrap import runtime_guard,exists
+    expected=os.getenv("NDC_AGENT_EXPECTED_ID")
+    if expected is not None or exists(root/"bootstrap-binding.json"):
         with open(root/"agent.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            obj=load()
-            prepare(root,obj)
-            start(root,lock_held=True,expected_id=obj["agent_id"])
+            runtime_guard(root,expected or "")
+            start(root,lock_held=True,expected_id=expected)
     else:start(root)
 
 def start(root,*,lock_held=False,expected_id=None):

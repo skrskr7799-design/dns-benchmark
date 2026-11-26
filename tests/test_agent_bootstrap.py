@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from backend.ndc.agent_control_pki import Authority,private_write
-from backend.ndc.agent_bootstrap import load,prepare,confirm
+from backend.ndc.agent_bootstrap import load,prepare,confirm,runtime_guard
 
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
@@ -43,6 +43,14 @@ class BootstrapTests(unittest.TestCase):
         for changes in ({"expires_at":1},{"token":"","expires_at":0}):
             with self.assertRaises(ValueError):prepare(self.root,self.parsed(**changes))
         self.assertEqual([p.name for p in self.root.iterdir()],["controller-ca.sha256"])
+    def test_runtime_binding_and_ca(self):
+        obj=self.parsed()
+        confirm(self.root,obj,obj["ca_sha256"]);prepare(self.root,obj)
+        with patch.dict(os.environ,{"NDC_AGENT_CA_SHA256":obj["ca_sha256"]}):
+            runtime_guard(self.root,obj["agent_id"])
+            with self.assertRaises(ValueError):runtime_guard(self.root,"c"*32)
+            private_write(self.root/"controller-ca.pem",Authority(self.root,"100.64.0.9").ca_pem.encode())
+            with self.assertRaises(ValueError):runtime_guard(self.root,obj["agent_id"])
     def test_config_mismatch_and_symlink(self):
         obj=self.parsed()
         confirm(self.root,obj,obj["ca_sha256"])

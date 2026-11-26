@@ -85,10 +85,38 @@ def prepare(root,obj):
         raise ValueError("Existing allowlist differs; deliberate local migration required")
     if not enrolled and exists(token_path) and private_read(token_path).decode().strip()!=obj["token"]:
         raise ValueError("Existing invitation differs; deliberate re-enrollment required")
+    binding=root/"bootstrap-binding.json"
+    marker={"id":obj["agent_id"],"origin":obj["origin"],"sha256":obj["ca_sha256"]}
+    if exists(binding) and json.loads(private_read(binding))!=marker:
+        raise ValueError("Volume belongs to another agent")
     if not exists(ca):private_write(ca,obj["ca_pem"].encode("ascii"))
     if not exists(allowed):private_write(allowed,json.dumps(obj["endpoints"]).encode())
     if not enrolled and not exists(token_path):private_write(token_path,(obj["token"]+"\n").encode())
     if enrolled and exists(token_path):token_path.unlink()
+    if not exists(binding):private_write(binding,json.dumps(marker).encode("ascii"))
+
+def runtime_guard(root,agent_id):
+    """Validate the prepared trust and agent binding before opening any connection."""
+    if not re.fullmatch(r"[a-f0-9]{32}",agent_id) or os.getenv("NDC_AGENT_MTLS")!="1" or os.getenv("NDC_AGENT_PROTOCOL")!="2":
+        raise ValueError("Invalid prepared agent configuration")
+    root=Path(root)
+    if os.getenv("NDC_AGENT_CA_FILE")!=str(root/"controller-ca.pem"):
+        raise ValueError("Prepared CA path required")
+    marker=json.loads(private_read(root/"bootstrap-binding.json"))
+    if marker!={"id":agent_id,"origin":os.environ["NDC_CONTROLLER_URL"],"sha256":os.environ["NDC_AGENT_CA_SHA256"]}:
+        raise ValueError("Prepared agent binding mismatch")
+    pin=marker["sha256"]
+    if not re.fullmatch(r"[a-f0-9]{64}",pin) or not hmac.compare_digest(private_read(root/"controller-ca.sha256"),(pin+"\n").encode("ascii")):
+        raise ValueError("Independent CA confirmation required")
+    cert=x509.load_pem_x509_certificate(private_read(root/"controller-ca.pem"))
+    if not hmac.compare_digest(cert.fingerprint(hashes.SHA256()).hex(),pin):
+        raise ValueError("Prepared CA mismatch")
+    identity=root/"identity.json"
+    if exists(identity):
+        saved=json.loads(private_read(identity))
+        if saved.get("id")!=agent_id or saved.get("controller")!=marker["origin"] or not saved.get("certificate"):
+            raise ValueError("Volume belongs to another agent")
+        if exists(root/"enrollment-token"):(root/"enrollment-token").unlink()
 
 def main():
     parser=argparse.ArgumentParser(description="Verify embedded CA against independently obtained fingerprint")
@@ -100,6 +128,7 @@ def main():
     with open(root/"agent.lock","a") as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         confirm(root,obj,args.fingerprint)
-    print("Controller CA SHA-256 verified: "+obj["ca_sha256"])
+        prepare(root,obj)
+    print("Controller CA SHA-256 verified; agent volume prepared: "+obj["ca_sha256"])
 
 if __name__=="__main__":main()

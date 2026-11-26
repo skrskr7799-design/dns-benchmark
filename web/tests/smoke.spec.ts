@@ -187,6 +187,8 @@ test('agents workspace creates a batch and shows both sites',async({page})=>{
  const generated=page.getByRole('textbox',{name:'Готовый Compose'})
  await expect.poll(()=>generated.inputValue()).toContain(enrollment.token)
  await expect.poll(()=>generated.inputValue()).toContain('agent-data:/data')
+ await expect.poll(()=>generated.inputValue()).toContain('network_mode: none')
+ await expect.poll(()=>generated.inputValue()).toContain('profiles: ["bootstrap"]')
  await page.getByLabel('Память агента').selectOption('512')
  await expect.poll(()=>generated.inputValue()).toContain('mem_limit: 512m')
  nodes.push({...nodes[0],id:enrollment.id,name:'UK-02',online:true,enrolled:1})

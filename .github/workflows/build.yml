@@ -70,15 +70,17 @@ jobs:
           import {agentCompose} from "./web/src/shared/agent-compose.ts";
           const d=process.env.BOOT_DIR, trust=JSON.parse(readFileSync(d+"/trust.json","utf8"));
           const invite={id:"a".repeat(32),token:"b".repeat(43),expires_at:Math.floor(Date.now()/1000)+600};
-          const yaml=agentCompose(trust,invite,{memory:384,restart:true,endpoints:["udp://1.1.1.1"]}).replace("ghcr.io/skrskr7799-design/dns-benchmark:edge","dns-benchmark:test");
+          const yaml=agentCompose(trust,invite,{memory:384,restart:true,endpoints:["udp://1.1.1.1"]}).replaceAll("ghcr.io/skrskr7799-design/dns-benchmark:edge","dns-benchmark:test");
           writeFileSync(d+"/compose.yaml",yaml,{mode:0o600});
           JS
           trap 'docker compose -f "$dir/compose.yaml" down -v --remove-orphans >/dev/null 2>&1 || true; rm -rf "$dir"' EXIT
-          docker compose -f "$dir/compose.yaml" config --quiet
+          docker compose --profile bootstrap -f "$dir/compose.yaml" config --format json | jq -e '.services.agent.read_only == true and .services.bootstrap.network_mode == "none" and .services.bootstrap.read_only == false and ((.services.agent.configs // [])|length==0) and ((.services.agent.ports // [])|length==0)'
           fp=$(jq -r .sha256 "$dir/trust.json")
-          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -m backend.ndc.agent_bootstrap verify "$fp"
-          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -c 'from pathlib import Path; from backend.ndc.agent_bootstrap import load,prepare; import os; assert os.getuid()==10001; p=Path("/data"); prepare(p,load()); assert (p/"controller-ca.pem").stat().st_mode & 0o777 == 0o600'
-          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -c 'from pathlib import Path; from backend.ndc.agent_bootstrap import load,prepare; p=Path("/data"); assert (p/"enrollment-token").exists(); prepare(p,load())'
+          if docker compose -f "$dir/compose.yaml" run --rm --no-deps bootstrap verify "$(printf '%064d' 0)"; then echo "Wrong CA accepted"; exit 1; fi
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps bootstrap verify "$fp"
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -c 'from pathlib import Path; from backend.ndc.agent_bootstrap import runtime_guard; import os; assert os.getuid()==10001; p=Path("/data"); runtime_guard(p,os.environ["NDC_AGENT_EXPECTED_ID"]); assert (p/"controller-ca.pem").stat().st_mode & 0o777 == 0o600; assert (p/"enrollment-token").exists(); assert not Path("/run/ndc-bootstrap.json").exists()'
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps bootstrap verify "$fp"
+          docker compose -f "$dir/compose.yaml" run --rm --no-deps --entrypoint python agent -c 'from pathlib import Path; from backend.ndc.agent_bootstrap import runtime_guard; import os; p=Path("/data"); runtime_guard(p,os.environ["NDC_AGENT_EXPECTED_ID"]); assert (p/"enrollment-token").exists()'
       - name: Agent control PKI and real TLS listener
         run: docker run --rm --entrypoint python -i dns-benchmark:test - < tests/test_agent_control_tls.py
       - name: Python dependency audit
