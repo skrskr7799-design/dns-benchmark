@@ -46,10 +46,11 @@ class PeerCoordination:
     peer_enabled=False
 
     def peer_reserved(self,c,id):
-        return bool(c.execute("""SELECT 1 FROM peer_requests WHERE
+        return self.goodput_reserved(c,id) or bool(c.execute("""SELECT 1 FROM peer_requests WHERE
             (source_id=? OR destination_id=?) AND finished IS NULL LIMIT 1""",(id,id)).fetchone())
 
     def peer_expire(self,c,now):
+        self.goodput_expire(c,now)
         c.execute("""UPDATE peer_requests SET state='interrupted',outcome='unknown',finished=?
             WHERE finished IS NULL AND (deadline<=? OR created>?)""",(now,now,now))
         c.execute("DELETE FROM peer_requests WHERE finished IS NOT NULL AND finished<?",(now-RETENTION,))
@@ -59,6 +60,7 @@ class PeerCoordination:
                 self.peer_handoffs.pop(id,None)
 
     def peer_invalidate(self,c,id):
+        self.goodput_invalidate(c,id)
         for r in c.execute("SELECT id FROM peer_requests WHERE finished IS NULL AND (source_id=? OR destination_id=?)",(id,id)):
             self.peer_handoffs.pop(r[0],None)
         c.execute("DELETE FROM peer_claims WHERE agent_id=?",(id,))
@@ -102,6 +104,7 @@ class PeerCoordination:
         encoded=canonical(plan.model_dump(mode="json"));d=plan.direction
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE");self.expire(c)
+            if c.execute("SELECT 1 FROM goodput_requests WHERE id=?",(plan.request_id,)).fetchone():raise PeerConflict("Cross-kind request ID conflict")
             existing=c.execute("SELECT plan FROM peer_requests WHERE id=?",(plan.request_id,)).fetchone()
             if existing:
                 if existing[0]!=encoded:raise PeerConflict("Request ID conflict")

@@ -25,8 +25,9 @@ def secret():
     return secrets.token_urlsafe(32)
 
 from .peer_coordination import PeerCoordination,SCHEMA as PEER_SCHEMA
+from .goodput_coordination import GoodputCoordination,SCHEMA as GOODPUT_SCHEMA
 
-class AgentStore(PeerCoordination):
+class AgentStore(PeerCoordination,GoodputCoordination):
     # Only implemented types; each agent must explicitly claim local support.
     remote_kinds=("tcp","tls","http","route")
 
@@ -53,7 +54,7 @@ class AgentStore(PeerCoordination):
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3,4):
+            if version not in (0,1,2,3,4,5):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -115,6 +116,9 @@ class AgentStore(PeerCoordination):
 
             if version<4:
                 c.executescript("BEGIN IMMEDIATE;"+PEER_SCHEMA+"PRAGMA user_version=4;COMMIT;")
+
+            if version<5:
+                c.executescript("BEGIN IMMEDIATE;"+GOODPUT_SCHEMA+"PRAGMA user_version=5;COMMIT;")
 
     def capability_list(self):
         with self.db() as c:

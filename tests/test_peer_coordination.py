@@ -92,8 +92,69 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"cancelled")
     def test_migration(self):
         with self.s.db() as c:
+            c.execute("DROP TABLE goodput_requests");c.execute("DROP TABLE goodput_claims");c.execute("DROP TABLE goodput_clock")
             c.execute("DROP TABLE peer_requests");c.execute("DROP TABLE peer_claims");c.execute("PRAGMA user_version=3")
         self.s.initialize();self.admit()
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"queued")
+
+    def goodput(self,n=1):
+        from backend.ndc.peer_throughput import ThroughputPolicy,ThroughputPlan
+        return ThroughputPlan(request_id=format(n,"032x"),policy=ThroughputPolicy(direction=self.d,byte_count=4194304,rate_bps=8000000))
+    def goodput_claims(self):
+        self.claims();self.s.goodput_enabled=True
+        for n in (self.a,self.b):self.s.goodput_report_claims(n["credential"],[self.goodput().policy])
+    def test_goodput_gates_reservation_and_budget(self):
+        p=self.goodput()
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(p)
+        self.claims();self.s.goodput_enabled=True
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(p)
+        self.goodput_claims()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            result=list(pool.map(lambda _:self.s.goodput_admit(p),range(2)))
+        self.assertEqual(sum(not x["duplicate"] for x in result),1)
+        self.assertIsNone(self.s.peer_offer(self.a["credential"])["offer"])
+        self.assertIsNone(self.s.peer_offer(self.b["credential"])["offer"])
+        self.assertIsNone(self.s.poll_v2(self.a["credential"],PollV2(version="2",engine="python-network-v2",capabilities=["dns"]))["task"])
+        with self.assertRaises(PeerConflict):self.s.peer_admit(self.p)
+        with self.assertRaises(PeerConflict):self.s.peer_admit(self.p.model_copy(update={"request_id":p.request_id}))
+        self.assertTrue(self.s.goodput_cancel(p.request_id))
+        for i in range(2,5):
+            q=self.goodput(i);self.s.goodput_admit(q);self.s.goodput_cancel(q.request_id)
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(self.goodput(5))
+        self.s=AgentStore(self.path,lambda:self.now);self.s.initialize();self.goodput_claims()
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(self.goodput(5))
+        self.now-=1
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(self.goodput(5))
+        self.now+=61;self.goodput_claims();self.s.goodput_admit(self.goodput(5))
+        self.s.goodput_report_claims(self.b["credential"],[])
+        with self.s.db() as c:
+            self.assertEqual(c.execute("SELECT state FROM goodput_requests WHERE id=?",(self.goodput(5).request_id,)).fetchone()[0],"cancelled")
+        self.assertEqual(self.s.evidence_status()["pending"],0)
+
+    def test_goodput_global_budget_and_migration(self):
+        from backend.ndc.peer_throughput import ThroughputPolicy,ThroughputPlan
+        with self.s.db() as c:
+            c.execute("DROP TABLE goodput_requests");c.execute("DROP TABLE goodput_claims");c.execute("DROP TABLE goodput_clock");c.execute("PRAGMA user_version=4")
+        self.s.initialize();self.goodput_claims()
+        pairs=[]
+        for i in range(5):
+            nodes=[self.s.enroll(self.s.invite("node"+str(i)+str(j),"site")["token"]) for j in range(2)]
+            d=self.d.model_copy(update={"source_agent_id":nodes[0]["id"],"destination_agent_id":nodes[1]["id"]})
+            policy=ThroughputPolicy(direction=d,byte_count=4194304,rate_bps=8000000)
+            for n in nodes:self.s.goodput_report_claims(n["credential"],[policy])
+            pairs.append((policy,nodes))
+        def plan(i,j):return ThroughputPlan(request_id=format(100+i*10+j,"032x"),policy=pairs[i][0])
+        for i in range(4):self.s.goodput_admit(plan(i,0))
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(plan(4,0))
+        for i in range(4):self.s.goodput_cancel(plan(i,0).request_id)
+        for i in range(4):self.s.goodput_admit(plan(i,1));self.s.goodput_cancel(plan(i,1).request_id)
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(plan(4,1))
+        self.now+=60
+        for policy,nodes in pairs:
+            for n in nodes:self.s.goodput_report_claims(n["credential"],[policy])
+        self.s.goodput_admit(plan(4,1))
+        self.s.rotate(pairs[4][1][0]["id"])
+        with self.s.db() as c:
+            self.assertEqual(c.execute("SELECT state FROM goodput_requests WHERE id=?",(plan(4,1).request_id,)).fetchone()[0],"cancelled")
 
 if __name__=="__main__":unittest.main()
