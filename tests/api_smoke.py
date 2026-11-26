@@ -409,6 +409,10 @@ if route_capabilities()["ipv4"]:
 else:
     print("SKIP: remote route IPv4 kernel error queue unavailable")
 
+# New independent integration phase. Let the production sliding write
+# budget (60 writes/60s) expire; do not weaken the guard or retry assertions.
+print("Starting distributed integration phase after write-budget cooldown",flush=True)
+time.sleep(61)
 # Real matched remote TCP batch through two separately enrolled agents.
 with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1","NDC_ALLOWED_CIDRS":"127.0.0.1/32"}),socket.socket() as listener:
     listener.bind(("127.0.0.1",0));listener.listen(4);listener.settimeout(4)
