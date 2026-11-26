@@ -2,7 +2,7 @@
 Only scheduler clock accelerated; actual TLS verification and handshake.
 """
 import datetime
-import hashlib
+import json
 import os
 import socket
 import ssl
@@ -17,6 +17,8 @@ from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from backend.ndc.evidence import EvidenceStore
+from backend.ndc.storage import Store
+from backend.ndc.agent_store import AgentStore
 from backend.ndc.monitoring import MonitorStore,MonitorScheduler
 from backend.ndc.time_machine import SnapshotStore
 from backend.ndc.snapshot_schedule import Schedules,ScheduleConfig
@@ -71,6 +73,10 @@ class Tests(unittest.TestCase):
                         e=EvidenceStore(path/"intelligence.sqlite",clock=clock);e.initialize()
                         m=MonitorStore(path/"monitoring.sqlite",clock);m.initialize()
                         return e,m,SnapshotStore(e),Schedules(e,m)
+                    # Match the deployed data-directory contract. Backup must
+                    # still reject a directory missing its mandatory history DB.
+                    history=Store(data/"history.sqlite");history.initialize()
+                    agents=AgentStore(data/"agents.sqlite",clock);agents.initialize()
                     e,m,s,q=stores(data)
                     cfg=TLSCapture(host="localhost",port=listener.getsockname()[1])
                     job=q.create(ScheduleConfig(label="TLS rotation",interval_seconds=3600,probe=cfg))
@@ -79,7 +85,12 @@ class Tests(unittest.TestCase):
                     claim=q.claim();first=s.create_probe(claim["pending_id"],"TLS rotation",cfg)
                     self.assertTrue(first["snapshot"]["observation"]["verified"],first)
                     self.assertEqual(first["snapshot"]["observation"]["fingerprint"],fp_a)
-                    backup(data,root/"backup");restore(root/"backup",root/"restored")
+                    backup(data,root/"backup")
+                    manifest=json.loads((root/"backup"/"manifest.json").read_text())
+                    self.assertEqual(set(manifest["files"]),{"history.sqlite","monitoring.sqlite","agents.sqlite","intelligence.sqlite"})
+                    restore(root/"backup",root/"restored")
+                    Store(root/"restored"/"history.sqlite").initialize()
+                    AgentStore(root/"restored"/"agents.sqlite",clock).initialize()
                     e,m,s,q=stores(root/"restored");q.recover()
                     self.assertEqual(q.list()[0]["last_snapshot_id"],first["id"])
                     self.assertEqual(q.list()[0]["runs"],1)

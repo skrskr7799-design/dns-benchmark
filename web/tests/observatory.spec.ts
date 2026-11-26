@@ -11,8 +11,21 @@ test('Observatory route, pause gaps, journal and responsive states',async({page}
  await page.getByRole('button',{name:'Войти',exact:true}).click()
  await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()
  let empty=true,fail=false,noPoints=false
+ let maintenance:{id:number;monitor_id:string;starts_at:number;ends_at:number;state:string;created_at:number;applied_at:number|null;finished_at:number|null}[]=[]
+ await page.route('**/api/v1/monitoring/monitors/'+id+'/maintenance',r=>{
+  expect(r.request().method()).toBe('POST')
+  const b=r.request().postDataJSON()
+  expect(b.ends_at-b.starts_at).toBe(3600)
+  const w={id:1,monitor_id:id,starts_at:b.starts_at,ends_at:b.ends_at,state:'scheduled',created_at:now,applied_at:null,finished_at:null}
+  maintenance=[w];return r.fulfill({status:201,json:w})
+ })
+ await page.route('**/api/v1/monitoring/monitors/'+id+'/maintenance/1',r=>{
+  expect(r.request().method()).toBe('DELETE')
+  maintenance=[{...maintenance[0],state:'cancelled',finished_at:now}]
+  return r.fulfill({json:maintenance[0]})
+ })
  await page.route('**/api/v1/intelligence/observatory/monitors',r=>r.fulfill({json:empty?[]:[monitor]}))
- await page.route('**/api/v1/intelligence/observatory/monitors/*?*',r=>fail?r.fulfill({status:422,json:{detail:'Narrow window'}}):r.fulfill({json:noPoints?{...fixture,points:[],counts:{total:0,success:0,degraded:0,failure:0,unknown:0,known:0},observed_healthy_ratio:null}:fixture}))
+ await page.route('**/api/v1/intelligence/observatory/monitors/*?*',r=>fail?r.fulfill({status:422,json:{detail:'Narrow window'}}):r.fulfill({json:noPoints?{...fixture,points:[],counts:{total:0,success:0,degraded:0,failure:0,unknown:0,known:0},observed_healthy_ratio:null}:{...fixture,persistent:{...fixture.persistent,maintenance}}}))
  await page.route('**/api/v1/intelligence/observations/'+eid,r=>r.fulfill({json:{id:eid,seq:1,received_at:now,record:{observed_at:now,vantage_id:'controller',measurements:[{name:'latency',unit:'ms',value:60}]}}}))
  await page.goto('/#/observatory')
  await expect(page.getByRole('heading',{name:'Нет настроенных мониторов'})).toBeVisible()
@@ -43,4 +56,14 @@ test('Observatory route, pause gaps, journal and responsive states',async({page}
  fail=false;noPoints=false
  await page.getByRole('button',{name:'Повторить',exact:true}).click()
  await expect(page.locator('.obs-chart')).toBeVisible()
+ const local=(offset:number)=>new Date(Date.now()+offset-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16)
+ await page.getByLabel('Начало обслуживания').fill(local(7200000))
+ await page.getByLabel('Конец обслуживания').fill(local(3600000))
+ await page.getByRole('button',{name:'Запланировать окно'}).click()
+ await expect(page.locator('.obs-maintenance [role=alert]')).toContainText('Укажите корректные')
+ await page.getByLabel('Конец обслуживания').fill(local(10800000))
+ await page.getByRole('button',{name:'Запланировать окно'}).click()
+ await expect(page.getByText('Обслуживание запланировано',{exact:true})).toBeVisible()
+ await page.getByRole('button',{name:'Отменить окно'}).click()
+ await expect(page.getByRole('button',{name:'Запланировать окно'})).toBeVisible()
 })
