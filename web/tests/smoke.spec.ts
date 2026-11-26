@@ -21,13 +21,38 @@ test('start, progress, table and export against controlled API fixture',async({p
  await page.route('**/api/run',async r=>{expect(r.request().postDataJSON()).toMatchObject({endpoints:[row.endpoint],count:2,mode:'cold'});started=true;await r.fulfill({json:{started:true}})})
  await login(page)
  await page.getByRole('link',{name:'DNS Benchmark'}).click()
+ await expect(page.locator('#endpoints')).toHaveValue(/https:\/\//)
  await page.locator('#endpoints').fill(row.endpoint)
+ await expect(page.locator('#endpoints')).toHaveValue(row.endpoint)
  await page.getByLabel('Запросов').fill('2')
  await page.getByRole('button',{name:'Запустить тест'}).click()
  await expect(page.getByRole('cell',{name:'2/2'})).toBeVisible()
  const download=page.waitForEvent('download')
  await page.getByRole('button',{name:'Экспорт JSON'}).click()
  expect((await download).suggestedFilename()).toBe('dns-results.json')
+})
+
+test('manual DNS input survives delayed defaults and explicit reset',async({page})=>{
+ const custom='udp://127.0.0.1:15353',fallback='https://resolver.test/dns-query'
+ let release!:()=>void
+ const pending=new Promise<void>(resolve=>{release=resolve})
+ await page.route('**/api/defaults',async route=>{await pending;await route.fulfill({json:[fallback]})})
+ try{
+   await login(page)
+   await page.getByRole('link',{name:'DNS Benchmark'}).click()
+   const input=page.locator('#endpoints')
+   await expect(input).not.toBeEditable()
+   await page.getByRole('button',{name:'Ввести вручную'}).click()
+   await expect(input).toBeEditable()
+   await input.fill(custom)
+   await expect(input).toHaveValue(custom)
+   release()
+   const reset=page.getByRole('button',{name:'Список по умолчанию'})
+   await expect(reset).toBeEnabled()
+   await expect(input).toHaveValue(custom)
+   await reset.click()
+   await expect(input).toHaveValue(fallback)
+ }finally{release()}
 })
 
 test('inspector navigation, form and deterministic rendering',async({page})=>{
