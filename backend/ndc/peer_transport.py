@@ -40,7 +40,7 @@ def family(ip):
 def address(ip,port):
     return (ip,port) if family(ip)==socket.AF_INET else (ip,port,0,0)
 
-def credentials(cert,key,ca,*,server):
+def credentials(cert,key,ca,*,server,alpn=ALPN):
     # Explicit trust store only; no system roots or insecure mode.
     ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER if server else ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version=ctx.maximum_version=ssl.TLSVersion.TLSv1_3
@@ -48,7 +48,7 @@ def credentials(cert,key,ca,*,server):
     if not server:ctx.check_hostname=True
     ctx.load_verify_locations(cafile=str(ca))
     ctx.load_cert_chain(str(cert),str(key))
-    ctx.set_alpn_protocols([ALPN])
+    ctx.set_alpn_protocols([alpn])
     if server:ctx.num_tickets=0
     fp=x509.load_pem_x509_certificate(Path(cert).read_bytes()).fingerprint(hashes.SHA256()).hex()
     return ctx,fp
@@ -86,9 +86,9 @@ def write_exact(sock,data,deadline,cancel):
         if n<=0:raise PeerDenied("Incomplete frame")
         pos+=n
 
-def fingerprint(sock):
+def fingerprint(sock,alpn=ALPN):
     cert=sock.getpeercert(binary_form=True)
-    if not cert or sock.selected_alpn_protocol()!=ALPN:raise PeerDenied("Peer protocol denied")
+    if not cert or sock.selected_alpn_protocol()!=alpn:raise PeerDenied("Peer protocol denied")
     return hashlib.sha256(cert).hexdigest()
 
 def header(plan,token):
@@ -109,9 +109,11 @@ class Receiver:
     A failed handshake consumes the listener opportunity, not the grant.
     The operator must close/recreate it explicitly.
     """
+    alpn=ALPN
+
     def __init__(self,ip,port,grants,*,cert,key,ca):
         self.ip=checked_ip(ip);self.port=port;self.grants=grants
-        self.ctx,self.fp=credentials(cert,key,ca,server=True)
+        self.ctx,self.fp=credentials(cert,key,ca,server=True,alpn=self.alpn)
         self.approvals=tuple(a for a in grants.approvals if a.destination_ip==self.ip and a.port==port and a.destination_certificate==self.fp)
         if not self.approvals:raise PeerDenied("No locally approved listener")
         # Grant clock must be the same monotonic clock as transport.

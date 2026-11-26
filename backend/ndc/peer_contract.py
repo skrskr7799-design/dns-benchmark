@@ -88,7 +88,7 @@ class RTTReport(Strict):
 
 @dataclass(frozen=True)
 class Grant:
-    plan:RTTPlan
+    plan:Strict
     expires_at:float
 
 class LocalGrants:
@@ -98,6 +98,8 @@ class LocalGrants:
     never stored raw, and restart invalidates all outstanding grants.
     No listener or remote issuance API is provided in this stage.
     """
+    plan_type=RTTPlan
+
     def __init__(self,local_agent_id,approvals,*,clock=time.monotonic):
         self.local_agent_id=local_agent_id
         self.approvals=tuple(PeerDirection.model_validate(a.model_dump(mode="json") if isinstance(a,PeerDirection) else a) for a in approvals)
@@ -129,7 +131,7 @@ class LocalGrants:
         return hashlib.sha256(token.encode("ascii")).digest()
 
     def issue(self,plan,ttl=MAX_TTL_SECONDS):
-        plan=RTTPlan.model_validate(plan.model_dump(mode="json"))
+        plan=self.plan_type.model_validate(plan.model_dump(mode="json"))
         if type(ttl) is not int or not 1<=ttl<=MAX_TTL_SECONDS:
             raise ValueError("Invalid grant lifetime")
         with self.lock:

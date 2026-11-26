@@ -103,6 +103,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_peer_api.py
       - name: Two-agent peer runtime, actual mTLS and durable evidence
         run: docker exec -i benchmark python - < tests/test_peer_runtime.py
+      - name: Bounded peer throughput transport, actual mTLS and pacing
+        run: docker exec -i benchmark python - < tests/test_peer_throughput.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules
