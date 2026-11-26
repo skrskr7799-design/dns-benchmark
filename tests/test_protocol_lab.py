@@ -21,7 +21,7 @@ class Tests(unittest.TestCase):
 
     def test_deadline_never_publishes_partial(self):
         p=LabProfile(endpoints=["udp://127.0.0.1"],families=["ipv4"],modes=["cold"])
-        with patch.dict(os.environ,{"NDC_LAB_ENDPOINTS":'["udp://127.0.0.1"]'}),patch("backend.ndc.protocol_lab.subprocess.run",side_effect=subprocess.TimeoutExpired("fixture",45)):
+        with patch.dict(os.environ,{"NDC_LAB_ENDPOINTS":'["udp://127.0.0.1"]'}),patch("backend.ndc.protocol_lab.bounded_worker",side_effect=subprocess.TimeoutExpired("fixture",45)):
             r=run(p)
         self.assertEqual((r["status"],r["rows"],r["comparisons"]),("deadline",[],[]))
 

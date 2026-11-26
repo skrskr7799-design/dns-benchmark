@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import subprocess
+from .bounded_worker import bounded_worker
 import sys
 import time
 from typing import Literal
@@ -38,11 +39,9 @@ def run(cfg):
     try:
         # Minimal environment, no controller secrets or data path passed to worker.
         env={k:v for k,v in os.environ.items() if k in ("PATH","LANG","LC_ALL","PYTHONPATH")}
-        r=subprocess.run([sys.executable,"-m","backend.ndc.chaos_lab"],input=cfg.model_dump_json(),
-            text=True,capture_output=True,timeout=MAX_SECONDS,env=env,check=False)
+        raw=bounded_worker([sys.executable,"-m","backend.ndc.chaos_lab"],cfg.model_dump_json(),timeout=MAX_SECONDS,max_output=65536,env=env)
     except subprocess.TimeoutExpired:raise RuntimeError("Chaos model deadline") from None
-    if r.returncode or len(r.stdout)>65536:raise RuntimeError("Chaos model failed")
-    return json.loads(r.stdout)
+    return json.loads(raw)
 
 if __name__=="__main__":
     print(json.dumps(execute(Experiment.model_validate_json(sys.stdin.read(4096))),allow_nan=False))

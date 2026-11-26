@@ -7,6 +7,7 @@ import json
 import math
 import os
 import subprocess
+from .bounded_worker import bounded_worker
 import sys
 import threading
 import time
@@ -112,17 +113,14 @@ def run(profile):
     authorize(profile)
     start=time.time()
     try:
-        # No process creation inside the child. subprocess.run kills and waits
-        # on timeout; all sockets/worker threads belong to that process.
-        result=subprocess.run([sys.executable,"-m","backend.ndc.protocol_lab"],
-            input=profile.model_dump_json(),text=True,capture_output=True,timeout=MAX_SECONDS,check=False)
+        raw=bounded_worker([sys.executable,"-m","backend.ndc.protocol_lab"],
+            profile.model_dump_json(),timeout=MAX_SECONDS,max_output=MAX_OUTPUT)
     except subprocess.TimeoutExpired:
         return {"methodology":"protocol-laboratory-v1","profile":profile.model_dump(mode="json"),
             "profile_key":None,"vantage":"controller","status":"deadline","started_at":start,"finished_at":time.time(),
             "planned_queries":profile.planned_queries,"rows":[],"comparisons":[],
             "limitations":["child_terminated_no_partial_results","attempted_query_count_unknown"]}
-    if result.returncode!=0 or len(result.stdout)>MAX_OUTPUT:raise RuntimeError("Laboratory worker failed")
-    return json.loads(result.stdout)
+    return json.loads(raw)
 
 if __name__=="__main__":
     profile=LabProfile.model_validate_json(sys.stdin.read(16385))

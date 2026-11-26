@@ -4,7 +4,7 @@ import socket
 import threading
 import unittest
 from unittest.mock import patch
-from backend.ndc.internet_atlas import AtlasRequest,iana_base,execute,run
+from backend.ndc.internet_atlas import AtlasRequest,iana_base,execute,run,provider_ip,rdap
 from backend.ndc.web_xray import XRayRequest,canonical_url,header_projection,execute as xray_execute,run as xray_run
 
 class Tests(unittest.TestCase):
@@ -23,7 +23,7 @@ class Tests(unittest.TestCase):
     def test_atlas_metadata_projection(self):
         def get(client,url,params=None):
             if url.endswith("ipv4.json"):return {"services":[[["8.8.8.0/24"],["https://rdap.arin.net/registry/"]]]}
-            if "/ip/" in url:return {"name":"fixture allocation","country":"US","entities":[{"secret":"do not expose"}]}
+            if "/ip/" in url:return {"objectClassName":"ip network","startAddress":"8.8.8.0","endAddress":"8.8.8.255","name":"fixture allocation","country":"US","entities":[{"secret":"do not expose"}]}
             if "network-info" in url:return {"status":"ok","data":{"prefix":"8.8.8.0/24","asns":["15169"]}}
             if "rpki-validation" in url:return {"status":"ok","data":{"status":"valid"}}
             raise AssertionError(url)
@@ -33,6 +33,20 @@ class Tests(unittest.TestCase):
         self.assertEqual(r["data"]["ripe_network_info"]["value"]["origin_asns"],[15169])
         self.assertNotIn("secret",str(r))
         self.assertEqual(r["data"]["ripe_rpki"]["value"]["results"][0]["status"],"valid")
+
+    def test_provider_resolution_and_resource_binding(self):
+        addresses=[(socket.AF_INET,socket.SOCK_STREAM,6,"",("8.8.8.8",443)),
+            (socket.AF_INET,socket.SOCK_STREAM,6,"",("127.0.0.1",443))]
+        with patch("socket.getaddrinfo",return_value=addresses):
+            with self.assertRaises(ValueError):provider_ip("stat.ripe.net")
+        with patch("socket.getaddrinfo",return_value=addresses[:1]):
+            self.assertEqual(provider_ip("stat.ripe.net"),"8.8.8.8")
+            with self.assertRaises(ValueError):provider_ip("example.test")
+        with patch("backend.ndc.internet_atlas.iana_base",return_value="https://rdap.arin.net/registry/"),patch("backend.ndc.internet_atlas.get",return_value={"objectClassName":"ip network","startAddress":"1.1.1.0","endAddress":"1.1.1.255"}):
+            with self.assertRaises(ValueError):rdap(None,ipaddress.ip_address("8.8.8.8"))
+        with patch("backend.ndc.internet_atlas.iana_base",return_value="https://rdap.arin.net/registry/"),patch("backend.ndc.internet_atlas.get",return_value={"objectClassName":"autnum","startAutnum":100,"endAutnum":200}):
+            self.assertEqual(rdap(None,asn=123)["start_as"],100)
+            with self.assertRaises(ValueError):rdap(None,asn=300)
 
     def test_xray_url_and_header_redaction(self):
         self.assertEqual(canonical_url("https://example.com:443/"),"https://example.com/")

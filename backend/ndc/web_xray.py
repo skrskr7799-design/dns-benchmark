@@ -1,6 +1,7 @@
 """Scoped, body-free website diagnostics. No browser or credentials."""
 import json
 import subprocess
+from .bounded_worker import bounded_worker
 import sys
 import time
 from urllib.parse import urlsplit,urljoin,urlunsplit
@@ -83,13 +84,11 @@ def execute(config):
 def run(config):
     start=time.time()
     try:
-        r=subprocess.run([sys.executable,"-m","backend.ndc.web_xray"],input=config.model_dump_json(),
-            text=True,capture_output=True,timeout=MAX_SECONDS,check=False)
+        raw=bounded_worker([sys.executable,"-m","backend.ndc.web_xray"],config.model_dump_json(),timeout=MAX_SECONDS,max_output=262144)
     except subprocess.TimeoutExpired:
         return {"methodology":"website-xray-head-v1","request":config.model_dump(mode="json"),"vantage":"controller",
             "started_at":start,"finished_at":time.time(),"status":"deadline","hops":[],"limitations":["child_terminated_no_partial_results"]}
-    if r.returncode or len(r.stdout)>262144:raise RuntimeError("X-Ray worker failed")
-    return json.loads(r.stdout)
+    return json.loads(raw)
 
 if __name__=="__main__":
     print(json.dumps(execute(XRayRequest.model_validate_json(sys.stdin.read(8192))),allow_nan=False))

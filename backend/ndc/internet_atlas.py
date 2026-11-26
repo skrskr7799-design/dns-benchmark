@@ -9,7 +9,12 @@ import time
 from collections import OrderedDict
 from typing import Literal
 from urllib.parse import urlsplit
-import httpx
+import http.client
+import socket
+import ssl
+from contextlib import nullcontext
+from urllib.parse import urlencode
+from .bounded_worker import bounded_worker
 from pydantic import BaseModel,ConfigDict,Field,model_validator
 from .models import NetworkTarget
 from .scope import validate_ip
@@ -49,15 +54,45 @@ class AtlasRequest(BaseModel):
 def enabled():
     return os.getenv("NDC_ATLAS_ENABLED","0")=="1"
 
+PROVIDER_HOSTS=frozenset(urlsplit(u).hostname for u in (RIPE,IANA,*RIR))
+
+def provider_ip(host):
+    if host not in PROVIDER_HOSTS:raise ValueError("Unknown provider host")
+    addresses=socket.getaddrinfo(host,443,socket.AF_UNSPEC,socket.SOCK_STREAM)
+    if not addresses:raise ValueError("Provider DNS unavailable")
+    # Reject the entire DNS answer if any candidate is nonpublic, even if
+    # controller LAN scopes would otherwise permit it.
+    checked=[str(public_ip(a[4][0])) for a in addresses]
+    return checked[0]
+
+class ProviderConnection(http.client.HTTPSConnection):
+    def connect(self):
+        ip=provider_ip(self.host)
+        raw=socket.create_connection((ip,443),timeout=self.timeout)
+        try:
+            if str(public_ip(raw.getpeername()[0]))!=ip:raise ValueError("Unexpected provider peer")
+            self.sock=self._context.wrap_socket(raw,server_hostname=self.host)
+        except BaseException:
+            raw.close();raise
+
 def get(client,url,params=None):
-    with client.stream("GET",url,params=params,headers={"Accept":"application/json, application/rdap+json","User-Agent":"NDC-Atlas/1","Accept-Encoding":"identity"}) as r:
-        r.raise_for_status();body=bytearray()
-        for chunk in r.iter_bytes():
-            body.extend(chunk)
-            if len(body)>1048576:raise ValueError("Provider response limit")
-        data=json.loads(body)
+    u=urlsplit(url)
+    if u.scheme!="https" or u.hostname not in PROVIDER_HOSTS or u.port not in (None,443) or u.username is not None or u.password is not None or u.query or u.fragment:
+        raise ValueError("Invalid provider destination")
+    path=u.path+("?" + urlencode(params) if params else "")
+    conn=ProviderConnection(u.hostname,443,timeout=4,context=ssl.create_default_context())
+    try:
+        conn.request("GET",path,headers={"Accept":"application/json, application/rdap+json",
+            "User-Agent":"NDC-Atlas/1","Accept-Encoding":"identity","Connection":"close"})
+        with conn.getresponse() as r:
+            if r.status!=200:raise ValueError("Provider HTTP status")
+            if r.getheader("Content-Encoding","identity").lower()!="identity":raise ValueError("Compressed provider response rejected")
+            raw=r.read(1048577)
+            if len(raw)>1048576:raise ValueError("Provider response limit")
+        data=json.loads(raw)
         if not isinstance(data,dict):raise ValueError("Provider object required")
         return data
+    finally:conn.close()
 
 def iana_base(client,ip=None,asn=None):
     file="asn.json" if asn is not None else ("ipv4.json" if ip.version==4 else "ipv6.json")
@@ -84,6 +119,14 @@ def rdap(client,ip=None,asn=None):
     base=iana_base(client,ip,asn)
     if base is None:raise ValueError("Unsupported RIR endpoint")
     d=get(client,base+("autnum/"+str(asn) if asn is not None else "ip/"+str(ip)))
+    if asn is not None:
+        start,end=d.get("startAutnum"),d.get("endAutnum")
+        if d.get("objectClassName")!="autnum" or type(start) is not int or type(end) is not int or not 1<=start<=asn<=end<=4294967295:
+            raise ValueError("RDAP ASN mismatch")
+    else:
+        start,end=ipaddress.ip_address(d["startAddress"]),ipaddress.ip_address(d["endAddress"])
+        if d.get("objectClassName")!="ip network" or start.version!=ip.version or end.version!=ip.version or not start<=ip<=end:
+            raise ValueError("RDAP IP mismatch")
     return {"provider":base,"handle":text(d.get("handle")),"name":text(d.get("name")),
         "type":text(d.get("type")),"country_registration":text(d.get("country"),8),
         "start_address":text(d.get("startAddress"),64),"end_address":text(d.get("endAddress"),64),
@@ -109,9 +152,10 @@ def execute(config):
             except ValueError:ip=public_ip(resolve_host(target,443,config.family))
             else:raise
     def capture(name,fn):
-        try:data[name]={"retrieved_at":time.time(),"value":fn()}
+        try:
+            value=fn();data[name]={"retrieved_at":time.time(),"value":value}
         except Exception as exc:errors[name]=type(exc).__name__
-    with httpx.Client(timeout=4.,trust_env=False,follow_redirects=False) as client:
+    with nullcontext(None) as client:
         capture("rdap",lambda:rdap(client,ip,asn))
         if ip is not None:
             def network():
@@ -150,11 +194,9 @@ def run(config):
     if key in CACHE:
         CACHE.move_to_end(key);return CACHE[key][1]|{"cached":True}
     try:
-        r=subprocess.run([sys.executable,"-m","backend.ndc.internet_atlas"],input=config.model_dump_json(),
-            text=True,capture_output=True,timeout=MAX_SECONDS,check=False)
+        raw=bounded_worker([sys.executable,"-m","backend.ndc.internet_atlas"],config.model_dump_json(),timeout=MAX_SECONDS,max_output=131072)
     except subprocess.TimeoutExpired:raise RuntimeError("Atlas provider deadline") from None
-    if r.returncode or len(r.stdout)>131072:raise RuntimeError("Atlas lookup failed")
-    report=json.loads(r.stdout)
+    report=json.loads(raw)
     if report["data"] and not report["errors"]:
         CACHE[key]=(time.monotonic(),report)
         while len(CACHE)>64:CACHE.popitem(last=False)
