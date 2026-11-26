@@ -89,6 +89,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_remote_services.py
       - name: Remote route kernel acceptance and incomplete observation semantics
         run: docker exec -i benchmark python - < tests/test_remote_routes.py
+      - name: Remote distributed batch admission, comparison and retention
+        run: docker exec -i benchmark python - < tests/test_remote_batches.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules

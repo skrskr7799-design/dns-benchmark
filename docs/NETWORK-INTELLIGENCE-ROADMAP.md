@@ -109,6 +109,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05A1b | implemented / CI passed (45754782749) | typed TCP admission, shared lease, validated result and outbox; dispatch disabled |
 | NIP-05A2a | implemented / CI passed (45755238285) | scoped remote TCP subprocess, deadline, cancellation, v2 spool and real API acceptance |
 | NIP-05A2b1 | implemented / CI passed (45755567135) | TLS and HTTP/HTTPS scoped worker and typed evidence |
-| NIP-05A2b2 | implemented candidate / CI pending | bounded route worker and coverage-aware hop results |
-| NIP-05A3..C | planned | distributed analysis, peer measurements and UI |
+| NIP-05A2b2 | implemented / CI passed (45755942196) | bounded route worker and coverage-aware hop results |
+| NIP-05A3a | implemented candidate / CI pending | matched remote batches, bounded dispatch and compatible cohorts |
+| NIP-05A3b..C | planned | comparison review, peer measurements and UI |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

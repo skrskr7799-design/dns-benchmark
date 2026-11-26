@@ -409,6 +409,37 @@ if route_capabilities()["ipv4"]:
 else:
     print("SKIP: remote route IPv4 kernel error queue unavailable")
 
+# Real matched remote TCP batch through two separately enrolled agents.
+with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1","NDC_ALLOWED_CIDRS":"127.0.0.1/32"}),socket.socket() as listener:
+    listener.bind(("127.0.0.1",0));listener.listen(4);listener.settimeout(4)
+    cfg=RemoteTCP(host="127.0.0.1",port=listener.getsockname()[1])
+    agents=[];ids=[]
+    try:
+        for i in range(2):
+            invitation=request("/api/v1/agents/invite",{"name":"Distributed TCP "+str(i),"location":"fixture"})
+            root=Path(tmp)/str(i);root.mkdir();(root/"enrollment-token").write_text(invitation["token"])
+            a=Agent(root,base,["udp://127.0.0.1"],protocol_v2=True,approvals=(Approval(config=cfg,cidrs=["127.0.0.1/32"]),))
+            agents.append(a);ids.append(invitation["id"]);a.enroll();a.step()
+        body={"request_id":uuid.uuid4().hex,"agent_ids":ids,"config":cfg.model_dump(mode="json")}
+        bid=request("/api/v1/agents/remote-batches",body)["id"]
+        assert request("/api/v1/agents/remote-batches",body)["duplicate"]
+        for a in agents:
+            a.step();conn,_=listener.accept();conn.close()
+        report=request("/api/v1/agents/remote-batches/"+bid)
+        assert report["counts"]["success"]==2 and report["cohorts"][0]["comparable"],report
+        assert report["window"]["simultaneous_verified"] is False
+        assert request("/api/v1/agents/remote-batches")[0]["id"]==bid
+        for _ in range(50):
+            rows=request("/api/v1/intelligence/observations?source=agent&limit=200")["items"]
+            matches=[x["record"] for x in rows if x["record"]["correlation_id"]==bid]
+            if len(matches)==2:break
+            time.sleep(.2)
+        assert len(matches)==2 and len({x["vantage_id"] for x in matches})==2,matches
+        for id in ids:request("/api/v1/agents/"+id+"/revoke",{})
+    finally:
+        for a in agents:a.client.close()
+print("Real two-agent matched TCP batch and correlated evidence passed")
+
 # Same profile on two independent agent identities, including an offline interval.
 with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):
     with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:

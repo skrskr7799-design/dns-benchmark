@@ -62,6 +62,7 @@ class Tests(unittest.TestCase):
         task=self.s.enqueue(self.a["id"],self.cfg)["id"]
         lease=self.s.poll(self.a["credential"],Heartbeat())["task"]
         with self.s.db() as c:
+            c.execute("DROP TABLE remote_batch_policy")
             c.execute("DROP TABLE agent_capabilities")
             c.execute("ALTER TABLE tasks DROP COLUMN contract_version")
             c.execute("ALTER TABLE tasks DROP COLUMN probe_kind")

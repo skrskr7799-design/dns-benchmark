@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch, PollV2
 from .agent_store import AgentError
-from .remote_contract import RemoteRequest,RemoteHeartbeat,RemoteResult
+from .remote_contract import RemoteRequest,RemoteHeartbeat,RemoteResult,RemoteBatch
 
 router=APIRouter(prefix="/api/v1/agents")
 def call(fn,*args):
@@ -62,6 +62,22 @@ def remote_detail(request:Request,id:str):
 @router.post("/remote-tasks/{id}/cancel")
 def remote_cancel(request:Request,id:str):
     return call(store(request).remote_cancel,id)
+
+@router.post("/remote-batches",status_code=202)
+def create_remote_batch(request:Request,body:RemoteBatch):
+    return call(store(request).remote_batch,body)
+
+@router.get("/remote-batches")
+def remote_batches(request:Request):
+    return store(request).remote_batches()
+
+@router.get("/remote-batches/{id}")
+def remote_batch_detail(request:Request,id:str):
+    return call(store(request).remote_batch_detail,id)
+
+@router.post("/remote-batches/{id}/cancel")
+def remote_batch_cancel(request:Request,id:str):
+    return call(store(request).remote_batch_cancel,id)
 
 @router.post("/batches",status_code=202)
 def create_batch(request:Request,body:Batch):

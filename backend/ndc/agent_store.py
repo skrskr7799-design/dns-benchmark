@@ -12,6 +12,7 @@ from .agent_contract import ENGINE, VERSION, AgentRun, PROTOCOL_V2, CAPABILITY_T
 from .agent_evidence import records,encode
 from .remote_contract import CONFIG,config_key,validate_remote,project_remote
 from .evidence import canonical
+from .distributed import DISPATCH_WINDOW,compare as compare_remote_batch
 
 class AgentError(Exception):
     def __init__(self,status,message):
@@ -48,7 +49,7 @@ class AgentStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2):
+            if version not in (0,1,2,3):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -95,6 +96,16 @@ class AgentStore:
                     engine TEXT NOT NULL CHECK(engine='python-network-v2'),
                     capabilities TEXT NOT NULL,reported_at REAL NOT NULL);
                 PRAGMA user_version=2;
+                COMMIT;
+                """)
+
+            if version<3:
+                c.executescript("""
+                BEGIN IMMEDIATE;
+                CREATE TABLE remote_batch_policy(
+                    batch_id TEXT PRIMARY KEY REFERENCES batches(id) ON DELETE CASCADE,
+                    dispatch_until REAL NOT NULL);
+                PRAGMA user_version=3;
                 COMMIT;
                 """)
 
@@ -173,6 +184,9 @@ class AgentStore:
         now=self.clock()
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='leased' AND lease_until<=?",(now,now))
         c.execute("UPDATE tasks SET state='interrupted',finished=? WHERE state='queued' AND created<=?",(now,now-86400))
+        c.execute("""UPDATE tasks SET state='interrupted',finished=? WHERE state='queued' AND id IN (
+            SELECT m.task_id FROM batch_members m JOIN remote_batch_policy p ON p.batch_id=m.batch_id
+            WHERE p.dispatch_until<=?)""",(now,now))
         # Preserve all members until the whole batch is terminal and old.
         c.execute("""DELETE FROM tasks WHERE finished IS NOT NULL AND finished<? AND
             (id NOT IN (SELECT task_id FROM batch_members) OR id IN (
@@ -233,6 +247,8 @@ class AgentStore:
             if not agent:raise AgentError(404,"Enrolled agent not found")
             prior=c.execute("SELECT agent_id,contract_version,probe_kind,config FROM tasks WHERE id=?",(task,)).fetchone()
             if prior:
+                if c.execute("SELECT 1 FROM batch_members WHERE task_id=?",(task,)).fetchone():
+                    raise AgentError(409,"Task request ID already used by batch")
                 if tuple(prior)!=(id,"2",cfg.kind,encoded):raise AgentError(409,"Task request ID already used")
                 return {"id":task,"duplicate":True}
             if cfg.kind not in self.remote_kinds:raise AgentError(409,"Remote probe kind not enabled")
@@ -272,6 +288,74 @@ class AgentStore:
                 raise AgentError(409,"Remote task not active")
             return {"cancelled":True}
 
+    def remote_batch(self,body):
+        cfg=body.config;ids=body.agent_ids;encoded=canonical(cfg.model_dump(mode="json"))
+        fingerprint=digest(canonical(["remote-v2",ids,encoded,DISPATCH_WINDOW]))
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            existing=c.execute("SELECT fingerprint FROM batches WHERE id=?",(body.request_id,)).fetchone()
+            if existing:
+                if existing[0]!=fingerprint or not c.execute("SELECT 1 FROM remote_batch_policy WHERE batch_id=?",(body.request_id,)).fetchone():
+                    raise AgentError(409,"Batch request ID already used")
+                return {"id":body.request_id,"duplicate":True}
+            if cfg.kind not in self.remote_kinds:raise AgentError(409,"Remote probe kind not enabled")
+            now=self.clock()
+            if c.execute("SELECT count(*) FROM tasks").fetchone()[0]+len(ids)>10000:
+                raise AgentError(409,"Task history capacity reached")
+            for id in ids:
+                if not c.execute("SELECT 1 FROM agents WHERE id=? AND revoked=0 AND credential IS NOT NULL",(id,)).fetchone():
+                    raise AgentError(404,"Selected agent not enrolled")
+                cap=c.execute("SELECT capabilities,reported_at FROM agent_capabilities WHERE agent_id=?",(id,)).fetchone()
+                if not cap or not 0<=now-cap["reported_at"]<CAPABILITY_TTL or cfg.kind not in json.loads(cap["capabilities"]):
+                    raise AgentError(409,"Fresh matching capability required for every agent")
+                if c.execute("SELECT count(*) FROM tasks WHERE agent_id=? AND state IN ('queued','leased')",(id,)).fetchone()[0]>=4:
+                    raise AgentError(409,"Selected agent queue full")
+            c.execute("INSERT INTO batches VALUES(?,?,?,?)",(body.request_id,now,encoded,fingerprint))
+            c.execute("INSERT INTO remote_batch_policy VALUES(?,?)",(body.request_id,now+DISPATCH_WINDOW))
+            for id in ids:
+                task=uuid.uuid4().hex
+                c.execute("""INSERT INTO tasks(id,agent_id,config,state,created,contract_version,probe_kind)
+                    VALUES(?,?,?,'queued',?,'2',?)""",(task,id,encoded,now,cfg.kind))
+                c.execute("INSERT INTO batch_members VALUES(?,?,?)",(body.request_id,task,id))
+                self.audit(c,id,"remote batch task "+task)
+            return {"id":body.request_id,"duplicate":False}
+
+    def remote_batches(self):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            return [dict(r)|{"config":json.loads(r["config"])} for r in c.execute("""SELECT b.id,b.created,b.config,p.dispatch_until,count(t.id) AS total,
+                sum(CASE WHEN t.state IN ('queued','leased') THEN 0 ELSE 1 END) AS finished
+                FROM batches b JOIN remote_batch_policy p ON p.batch_id=b.id JOIN batch_members m ON m.batch_id=b.id
+                JOIN tasks t ON t.id=m.task_id GROUP BY b.id ORDER BY b.created DESC,b.id DESC LIMIT 50""")]
+
+    def remote_batch_detail(self,id):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            b=c.execute("""SELECT b.id,b.created,b.config,p.dispatch_until FROM batches b
+                JOIN remote_batch_policy p ON p.batch_id=b.id WHERE b.id=?""",(id,)).fetchone()
+            if not b:raise AgentError(404,"Remote batch not found")
+            rows=[]
+            for r in c.execute("""SELECT t.id,t.agent_id,t.state,t.created,t.finished,t.lease_until,t.payload,
+                a.name,a.location,a.last_seen,a.revoked FROM batch_members m JOIN tasks t ON t.id=m.task_id
+                JOIN agents a ON a.id=t.agent_id WHERE m.batch_id=? ORDER BY a.name,a.id""",(id,)):
+                row=dict(r);row["payload"]=json.loads(row["payload"]) if row["payload"] else None
+                row["online"]=bool(not row["revoked"] and row["last_seen"] is not None and 0<=self.clock()-row["last_seen"]<45)
+                rows.append(row)
+            cfg=CONFIG.validate_json(b["config"])
+            return dict(b)|{"config":cfg.model_dump(mode="json")}|compare_remote_batch(cfg,b["created"],b["dispatch_until"],rows)
+
+    def remote_batch_cancel(self,id):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            self.expire(c)
+            if not c.execute("SELECT 1 FROM remote_batch_policy WHERE batch_id=?",(id,)).fetchone():
+                raise AgentError(404,"Remote batch not found")
+            n=c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE id IN (SELECT task_id FROM batch_members WHERE batch_id=?) AND state IN ('queued','leased')",(self.clock(),id)).rowcount
+            return {"cancelled":n}
+
     def batch(self,body):
         config=body.config.model_dump_json()
         ids=sorted(body.agent_ids)
@@ -307,13 +391,14 @@ class AgentStore:
             return [dict(r)|{"config":json.loads(r["config"])} for r in c.execute("""SELECT b.id,b.created,b.config,count(t.id) AS total,
                 sum(CASE WHEN t.state IN ('queued','leased') THEN 0 ELSE 1 END) AS finished
                 FROM batches b JOIN batch_members m ON m.batch_id=b.id JOIN tasks t ON t.id=m.task_id
+                WHERE NOT EXISTS (SELECT 1 FROM remote_batch_policy p WHERE p.batch_id=b.id)
                 GROUP BY b.id ORDER BY b.created DESC LIMIT 50""")]
 
     def batch_detail(self,id):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
             self.expire(c)
-            b=c.execute("SELECT id,created,config FROM batches WHERE id=?",(id,)).fetchone()
+            b=c.execute("SELECT id,created,config FROM batches WHERE id=? AND NOT EXISTS (SELECT 1 FROM remote_batch_policy p WHERE p.batch_id=batches.id)",(id,)).fetchone()
             if not b:
                 raise AgentError(404,"Batch not found")
             rows=[]
@@ -331,7 +416,7 @@ class AgentStore:
     def cancel_batch(self,id):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
-            if not c.execute("SELECT 1 FROM batches WHERE id=?",(id,)).fetchone():
+            if not c.execute("SELECT 1 FROM batches WHERE id=? AND NOT EXISTS (SELECT 1 FROM remote_batch_policy p WHERE p.batch_id=batches.id)",(id,)).fetchone():
                 raise AgentError(404,"Batch not found")
             n=c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE id IN (SELECT task_id FROM batch_members WHERE batch_id=?) AND state IN ('queued','leased')",(self.clock(),id)).rowcount
             return {"cancelled":n}
@@ -411,6 +496,8 @@ class AgentStore:
             validate_remote(cfg,body)
             now=self.clock()
             record=project_remote(id,agent,cfg,body)
+            member=c.execute("SELECT batch_id FROM batch_members WHERE task_id=?",(id,)).fetchone()
+            if member:record=record.model_copy(update={"correlation_id":member[0]})
             c.execute("UPDATE tasks SET state=?,finished=?,payload=?,payload_hash=? WHERE id=?",(body.status,now,encoded,ph,id))
             if c.execute("SELECT count(*) FROM agent_evidence_outbox").fetchone()[0]>=self.max_evidence_pending:
                 c.execute("""UPDATE agent_evidence_coverage SET dropped_tasks=dropped_tasks+1,

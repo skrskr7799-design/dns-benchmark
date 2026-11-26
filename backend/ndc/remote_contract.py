@@ -48,6 +48,17 @@ class RemoteRequest(Strict):
     request_id:TaskID
     config:RemoteConfig
 
+class RemoteBatch(Strict):
+    request_id:TaskID
+    agent_ids:list[TaskID]=Field(min_length=2,max_length=8)
+    config:RemoteConfig
+
+    @field_validator("agent_ids")
+    @classmethod
+    def unique_agents(cls,ids):
+        if len(set(ids))!=len(ids):raise ValueError("Duplicate agent")
+        return sorted(ids)
+
 class RemoteHeartbeat(Strict):
     version:Literal["2"]
     engine:Literal["python-network-v2"]
