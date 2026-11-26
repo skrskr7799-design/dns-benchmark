@@ -133,7 +133,7 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_dns_intelligence_live.py
       - name: Obsidian responsive matrix
         working-directory: web
-        run: npm test -- visual.spec.ts intelligence.spec.ts observatory.spec.ts
+        run: npm test -- visual.spec.ts intelligence.spec.ts observatory.spec.ts time-machine.spec.ts
       - name: Obsidian browser screenshots
         if: always()
         uses: actions/upload-artifact@v4

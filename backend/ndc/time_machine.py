@@ -69,7 +69,9 @@ def capture_monitor_inventory(store):
 
 def item(row,*,full=True):
     result={k:row[k] for k in ("seq","id","label","captured_at","content_hash","size")}
-    if not full and "scope" in row.keys(): result["scope"]=row["scope"]
+    if not full and "scope" in row.keys():
+        result["scope"]=row["scope"]
+        result["config_key"]=row["config_key"]
     if full:
         result["snapshot"]=json.loads(row["payload"])
         if digest(result["snapshot"])!=row["content_hash"]: raise Conflict("Snapshot content checksum mismatch")
@@ -144,7 +146,7 @@ class SnapshotStore:
         if type(limit) is not int or not 1<=limit<=100: raise ValueError("Invalid limit")
         with self.evidence.db() as c:
             c.execute("BEGIN")
-            rows=c.execute("SELECT seq,id,label,captured_at,content_hash,size,json_extract(payload,'$.scope') AS scope FROM network_snapshots WHERE seq<? ORDER BY seq DESC LIMIT ?",
+            rows=c.execute("SELECT seq,id,label,captured_at,content_hash,size,json_extract(payload,'$.scope') AS scope,json_extract(payload,'$.config_key') AS config_key FROM network_snapshots WHERE seq<? ORDER BY seq DESC LIMIT ?",
                 (before if before is not None else 9223372036854775807,limit+1)).fetchall()
             entries=[item(r,full=False) for r in rows[:limit]]
             count,size=c.execute("SELECT count(*),coalesce(sum(size),0) FROM network_snapshots").fetchone()
