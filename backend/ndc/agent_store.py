@@ -189,6 +189,13 @@ class AgentStore(PeerCoordination,GoodputCoordination):
             self.audit(c,id,"enrolled")
         return {"id":id,"credential":credential,"version":VERSION}
 
+    def rate_identity(self,credential):
+        # Read-only preflight. Every route still authenticates in its own
+        # transaction, so credential rotation/revocation cannot authorize a
+        # later mutation using the preflight result.
+        with self.db() as c:
+            return self.identity(c,credential)
+
     def identity(self,c,credential):
         r=c.execute("SELECT * FROM agents WHERE credential=? AND revoked=0",(digest(credential),)).fetchone()
         if not r:

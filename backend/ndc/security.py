@@ -14,6 +14,7 @@ from collections import deque
 from pathlib import Path
 from fastapi import APIRouter, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 COOKIE="ndc_session"
@@ -78,6 +79,9 @@ class Security:
         self.writes=deque()
         self.agent_requests=deque()
         self.agent_enrollments=deque()
+        self.agent_active=deque()
+        self.agent_ingress=deque()
+        self.agent_windows={}
         self.secure_policy=os.getenv("NDC_SECURE_COOKIE","auto")
         if self.secure_policy not in ("0","1","auto"):
             raise RuntimeError("Invalid NDC_SECURE_COOKIE")
@@ -163,6 +167,26 @@ class Security:
             queue.append(now)
             return True
 
+    def agent_limit(self,agent_id,active):
+        # Two non-borrowing lanes; idle traffic cannot spend the active
+        # allowance. Keys are verified, stable agent IDs, never bearer tokens.
+        now=time.monotonic()
+        with self.lock:
+            for key,queue in list(self.agent_windows.items()):
+                while queue and queue[0]<=now-60:queue.popleft()
+                if not queue:del self.agent_windows[key]
+            global_queue=self.agent_active if active else self.agent_requests
+            while global_queue and global_queue[0]<=now-60:global_queue.popleft()
+            key=(agent_id,active)
+            own=self.agent_windows.get(key)
+            if len(global_queue)>=(240 if active else 480) or (own is not None and len(own)>=(100 if active else 80)):
+                return False
+            if own is None:
+                if len(self.agent_windows)>=64:return False
+                own=self.agent_windows[key]=deque()
+            own.append(now);global_queue.append(now)
+            return True
+
     def login(self,password,username=None):
         if not self.limit(self.attempts,10):
             raise HTTPException(429,"Too many login attempts")
@@ -240,11 +264,30 @@ async def guard(request,call_next):
     if machine:
         if security.setup_required:
             return JSONResponse({"detail":"Initial setup required"},403)
-        queue=security.agent_enrollments if path.endswith("/enroll") else security.agent_requests
-        if not security.limit(queue,30 if path.endswith("/enroll") else 600):
-            return JSONResponse({"detail":"Agent rate limit"},429)
+        headers={"Cache-Control":"no-store"}
         if request.headers.get("origin") or request.cookies.get(COOKIE):
-            return JSONResponse({"detail":"Machine credentials only"},403)
+            return JSONResponse({"detail":"Machine credentials only"},403,headers=headers)
+        if path.endswith("/enroll"):
+            if not security.limit(security.agent_enrollments,30):
+                return JSONResponse({"detail":"Agent rate limit"},429,headers=headers|{"Retry-After":"60"})
+        else:
+            # Bound all authentication attempts before touching SQLite. This
+            # is still a shared ingress ceiling, not a DoS availability guarantee.
+            if not security.limit(security.agent_ingress,1200):
+                return JSONResponse({"detail":"Agent ingress limit"},429,headers=headers|{"Retry-After":"60"})
+            values=request.headers.getlist("authorization")
+            if len(values)!=1 or not re.fullmatch(r"Bearer [A-Za-z0-9_-]{43}",values[0]):
+                return JSONResponse({"detail":"Agent credential required"},401,headers=headers)
+            from .agent_store import AgentError
+            try:
+                agent_id=await run_in_threadpool(request.app.state.agents.rate_identity,values[0][7:])
+            except AgentError as exc:
+                return JSONResponse({"detail":"Invalid agent credential"},exc.status,headers=headers)
+            # Only continuation endpoints use the reserved lane. Initial
+            # preparation/ready/start and regular polling use idle allowance.
+            active=bool(re.search(r"/(?:heartbeat|status|finish|results/[a-f0-9]{32})$",path))
+            if not security.agent_limit(agent_id,active):
+                return JSONResponse({"detail":"Agent rate limit"},429,headers=headers|{"Retry-After":"60"})
         failure=await bounded_body(request)
         if failure is not None:
             return failure

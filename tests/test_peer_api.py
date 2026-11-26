@@ -56,6 +56,35 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.owner.post("/api/v1/agents/machine/peer/offer",json={}).status_code,403)
         self.assertEqual(self.machine.get("/api/v1/agents/peer-requests").status_code,401)
         self.assertEqual(self.owner.post("/api/v1/agents/peer-requests",json=self.plan.model_dump(mode="json")).status_code,403)
+    def test_verified_rate_lanes_and_rotation(self):
+        receiver=self.ready()
+        sec=self.app.state.security
+        # Exhaust only source idle allowance and then global idle allowance.
+        while sec.agent_limit(self.a["id"],False):pass
+        path="/api/v1/agents/machine/peer/offer"
+        headers={"Authorization":"Bearer "+self.a["credential"]}
+        self.assertEqual(self.machine.post(path,json={},headers=headers).status_code,429)
+        for i in range(10):
+            while sec.agent_limit("fixture-"+str(i),False):pass
+        self.assertEqual(self.machine.post(path,json={},headers={"Authorization":"Bearer "+self.b["credential"]}).status_code,429)
+        self.assertTrue(self.send(self.b,"status",{"id":self.id,"lease":receiver})["active"])
+        # Invalid credentials cannot allocate verified buckets or active budget.
+        before=len(sec.agent_active)
+        self.assertEqual(self.machine.post("/api/v1/agents/machine/peer/status",json={},headers={"Authorization":"Bearer "+"x"*43}).status_code,401)
+        self.assertEqual(len(sec.agent_active),before)
+        self.s.rotate(self.b["id"])
+        self.send(self.b,"status",{"id":self.id,"lease":receiver},401)
+
+    def test_rate_window_expiry(self):
+        sec=self.app.state.security
+        with patch("backend.ndc.security.time.monotonic",return_value=100.):
+            for _ in range(80):self.assertTrue(sec.agent_limit(self.a["id"],False))
+            self.assertFalse(sec.agent_limit(self.a["id"],False))
+            self.assertTrue(sec.agent_limit(self.a["id"],True))
+        with patch("backend.ndc.security.time.monotonic",return_value=160.):
+            self.assertTrue(sec.agent_limit(self.a["id"],False))
+            self.assertNotIn((self.a["id"],True),sec.agent_windows)
+
     def test_one_shot_grant_and_results(self):
         receiver=self.ready()
         self.send(self.c,"start",{"id":self.id},409)
