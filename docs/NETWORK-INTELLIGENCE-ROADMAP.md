@@ -131,6 +131,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05C2b | planned | active-session load, RTT cancellation/restart hardening and physical acceptance |
 | NIP-06A/B | implemented / CI passed (45783888520) | resolver agreement, controlled DNSSEC behavior, pinned-key signature check and UI; no root-chain or client leak claim |
 | NIP-07A/B | implemented / CI passed (45784324206) | configured endpoint laboratory, fixed workload, child deadline, matched transport/reuse comparison and UI |
-| NIP-08A/B, NIP-09A/B | implemented candidate / CI pending | opt-in fixed-provider Atlas, bounded HEAD X-Ray, both workspaces |
-| NIP-10A/B | implemented candidate / CI pending | owner topology revisions, monitor/evidence binding, cycle-safe impact and responsive editor |
-| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10C, NIP-11..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-08A/B, NIP-09A/B | implemented / CI passed (45785449505) | opt-in fixed-provider Atlas, bounded HEAD X-Ray, both workspaces |
+| NIP-10A/B | implemented / CI passed (45785884186) | owner topology revisions, monitor/evidence binding, cycle-safe impact and responsive editor |
+| NIP-11A/B, NIP-12A/B | implemented candidate / CI pending | manual read-only scenario DAG, revision-pinned reports, synthetic fault model and workspaces |
+| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10C, NIP-11C, NIP-12C, NIP-13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

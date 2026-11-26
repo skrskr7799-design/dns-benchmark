@@ -113,7 +113,21 @@ export interface TwinGraph {nodes:TwinNode[];edges:TwinEdge[]}
 export interface TwinRevision {revision:number;parent:number|null;created:number|null;hash:string|null}
 export interface TwinModel extends TwinRevision {graph:TwinGraph}
 export interface TwinReport {model:TwinModel;observed_at:number;nodes:{id:string;direct:string;binding_status:string;observed_at:number|null;evidence_id:string|null;dependency_impact:string;failed_dependencies:string[];degraded_dependencies:string[];unknown_dependencies:string[];cycle:boolean;potentially_affected:string[]}[];limitations:string[]}
+export interface ScenarioStep {id:string;action:'monitor_state'|'twin_state'|'summarize';target:string|null;depends_on:string[];condition:'always'|'all_healthy'|'any_failed'|'any_unknown'}
+export interface ScenarioDefinition {name:string;twin_revision:number;steps:ScenarioStep[]}
+export interface ScenarioModel {revision:number;parent:number;created:number;hash:string;definition:ScenarioDefinition}
+export interface ScenarioRun {id:string;revision:number;dry_run:number;created:number;hash:string}
+export interface ScenarioResult extends ScenarioRun {result:{status:string;observed_at:number|null;twin_revision:number;steps:{id:string;action:string;status:string;state:string|null;evidence_id:string|null;dependency_impact?:string}[];limitations:string[]}}
+export interface ChaosProfile {seed:number;samples:number;baseline_ms:number;delay_ms:number;loss_pct:number;dns:'normal'|'servfail'|'timeout';timeout_ms:number}
+export interface ChaosResult {status:string;methodology:string;profile:ChaosProfile;rows:{index:number;outcome:string;modeled_ms:number|null}[];counts:Record<string,number>;baseline_success:number;limitations:string[]}
 export const api = {
+  scenario:(signal?:AbortSignal)=>request<ScenarioModel|null>('/api/v1/intelligence/scenario',{signal}),
+  scenarioSave:(body:{request_id:string;expected_revision:number;definition:ScenarioDefinition})=>request<ScenarioModel>('/api/v1/intelligence/scenario',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  scenarioRuns:(signal?:AbortSignal)=>request<ScenarioRun[]>('/api/v1/intelligence/scenario/runs',{signal}),
+  scenarioRun:(id:string,signal?:AbortSignal)=>request<ScenarioResult>('/api/v1/intelligence/scenario/runs/'+encodeURIComponent(id),{signal}),
+  scenarioExecute:(body:{request_id:string;revision:number;dry_run:boolean})=>request<ScenarioResult>('/api/v1/intelligence/scenario/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  chaosRun:(body:ChaosProfile)=>request<ChaosResult>('/api/v1/intelligence/chaos-lab',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+
   twin:(revision:number|null,signal?:AbortSignal)=>request<TwinReport>('/api/v1/intelligence/twin'+(revision===null?'':'?revision='+revision),{signal}),
   twinRevisions:(signal?:AbortSignal)=>request<TwinRevision[]>('/api/v1/intelligence/twin/revisions',{signal}),
   twinSave:(body:{request_id:string;expected_revision:number;graph:TwinGraph})=>request<TwinModel>('/api/v1/intelligence/twin',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),

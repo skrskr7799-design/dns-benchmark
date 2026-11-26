@@ -15,6 +15,8 @@ from .protocol_lab import LabProfile,capability as lab_capability,run as lab_run
 from .internet_atlas import AtlasRequest,run as atlas_run,enabled as atlas_enabled
 from .web_xray import XRayRequest,run as xray_run
 from .network_twin import Save as TwinSave,report as twin_report
+from .scenario import Save as ScenarioSave,Run as ScenarioRun
+from .chaos_lab import Experiment,run as chaos_run
 import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
@@ -86,6 +88,41 @@ def twin_save(request:Request,body:TwinSave):
     try:return state.twin.save(body,{m["id"] for m in state.monitors.list()})
     except (Conflict,Capacity) as exc:raise HTTPException(409,str(exc)) from None
     except ValueError:raise HTTPException(422,"Invalid topology or monitor binding") from None
+
+@router.get("/scenario")
+def scenario_latest(request:Request):
+    return request.app.state.scenarios.latest()
+
+@router.post("/scenario",status_code=201)
+def scenario_save(request:Request,body:ScenarioSave):
+    state=request.app.state
+    try:return state.scenarios.save(body,state.twin,{m["id"] for m in state.monitors.list()})
+    except (Conflict,Capacity) as exc:raise HTTPException(409,str(exc)) from None
+    except ValueError:raise HTTPException(422,"Invalid scenario or binding") from None
+
+@router.get("/scenario/runs")
+def scenario_runs(request:Request):
+    return request.app.state.scenarios.runs()
+
+@router.get("/scenario/runs/{id}")
+def scenario_run_detail(request:Request,id:str):
+    r=request.app.state.scenarios.get_run(id)
+    if r is None:raise HTTPException(404,"Scenario run not found")
+    return r
+
+@router.post("/scenario/runs",status_code=201)
+def scenario_run(request:Request,body:ScenarioRun):
+    state=request.app.state
+    try:return state.scenarios.run(body,state.twin,state.monitors,state.evidence)
+    except (Conflict,Capacity) as exc:raise HTTPException(409,str(exc)) from None
+    except ValueError:raise HTTPException(422,"Unknown scenario revision") from None
+
+@router.post("/chaos-lab")
+def chaos_experiment(body:Experiment):
+    if not inspection_slot.acquire(blocking=False):raise HTTPException(409,"Network inspection already running")
+    try:return chaos_run(body)
+    except RuntimeError:raise HTTPException(409,"Fault model unavailable") from None
+    finally:inspection_slot.release()
 
 @router.get("/dns/cohorts")
 def dns_cohorts(request:Request,since:float=Query(...,ge=0,le=253402300799),
