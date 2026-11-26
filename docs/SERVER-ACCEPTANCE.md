@@ -22,3 +22,6 @@ No server access or deployment performed in this pass. This is an acceptance pol
 
 ## Consolidation baseline
 The NIP-11/12 candidate 1d09699 is 51 commits ahead of main 920bffc with no main-only commits at verification. Mobile drawer 4a5121d diverged by one commit; its Shell, CSS and responsive assertions have been ported without replacing newer routes. Candidate CI and actual iOS Safari remain to be verified. Backup format v1 remains additive and compatible with older manifests; new database files are included when present. For a new deployment require all seven controller DBs in the verified backup manifest; older versions may legitimately lack some. Never use an old backup executable to back up newer data. See NIP-13.md for outstanding acceptance gates.
+
+## Integration candidate record
+See [INTEGRATION-CANDIDATE.md](INTEGRATION-CANDIDATE.md) for the exact successful application baseline, measured CI snapshot, screenshot review, current scope and isolated preview commands. New compose uses local SHA-tagged build or explicitly supplied image, loopback port 8113 by default and separate data. No merge or publication implied. Exact original archive, OS image scan and physical acceptance remain open.

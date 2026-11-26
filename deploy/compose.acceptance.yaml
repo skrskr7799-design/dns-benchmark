@@ -1,0 +1,35 @@
+name: ndc-acceptance
+services:
+  benchmark:
+    image: "${NDC_PREVIEW_IMAGE:?Set exact tested image or locally built SHA-tagged image}"
+    ports:
+      - "${NDC_PREVIEW_BIND:-127.0.0.1}:8113:8080"
+    volumes:
+      - /DATA/AppData/dns-benchmark-acceptance:/data
+    environment:
+      NDC_SECURE_COOKIE: "0"
+      NDC_MAX_JOBS: "500"
+      NDC_ALLOWED_CIDRS: "${NDC_PREVIEW_ALLOWED_CIDRS:-}"
+      NDC_PEER_ENABLED: "${NDC_PREVIEW_PEER_ENABLED:-0}"
+      NDC_GOODPUT_ENABLED: "${NDC_PREVIEW_GOODPUT_ENABLED:-0}"
+      NDC_ATLAS_ENABLED: "${NDC_PREVIEW_ATLAS_ENABLED:-0}"
+      NDC_LAB_ENDPOINTS: "${NDC_PREVIEW_LAB_ENDPOINTS:-[]}"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    pids_limit: 128
+    mem_limit: 768m
+    stop_grace_period: 35s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+x-casaos:
+  title:
+    en_us: Network Intelligence Acceptance
+  category: Network
+  port_map: "8113"
+  scheme: http
+  index: /
+  main: benchmark

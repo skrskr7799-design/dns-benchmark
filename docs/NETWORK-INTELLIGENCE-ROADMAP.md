@@ -148,3 +148,5 @@ Scenario automation candidate adds periodic and observed incident trigger, revis
 Functional candidate adds positive DNSSEC chain under explicitly supplied root key and real bounded loopback UDP DNS fault experiments; remaining acceptance in NIP-13.md. CI pending.
 
 Obsidian Signature candidate: navigation search, distinct module icons, matte shared components and populated diagnostic visualizations; corrected DNSSEC fixture failure and excluded wildcard-expanded signatures. Final acceptance pending.
+
+Application baseline 9563b7f: CI 45792952030 success. Integration candidate evidence, isolated preview and explicitly pending scope decisions: [INTEGRATION-CANDIDATE.md](INTEGRATION-CANDIDATE.md). No stable release or merge authorization inferred.

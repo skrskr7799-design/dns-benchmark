@@ -163,3 +163,6 @@ Ported 4a5121d mobile overlay into the current multi-module navigation without r
 
 ## NIP-13D — shared visual refinement candidate
 Maintains approved cyan #80D6DF, graphite matte panels and existing cube. Added filterable navigation for expanded 24-screen workspace (including mobile drawer), distinct line icons for new modules, consistent selected/focus states, positive button contrast, compact form groups, visual DNSSEC steps, actual packet result tiles and independent X-Ray phase bars. No invented network metrics; fixture captures clearly separated. Existing responsive matrix plus new populated packet and X-Ray captures at 1536/390/320; mobile filter assertion. Original reference JPEG archive and exact design-map values not available in this turn, so no pixel-perfect claim or final visual approval. Candidate CI pending.
+
+## Acceptance review — CI 45792952030
+Artifact 15104530258 downloaded: 198 PNGs. Reviewed top-viewport contact sheets of 19 populated desktop screens, 18 each at 390 and 320px. Consistent cool graphite/cyan identity, compact mobile hierarchy; long mobile setup forms push results down, full-page screenshots after interaction sometimes show sticky sidebar offset. Exact original JPEG archive unavailable; no complete reference or physical Safari approval. See INTEGRATION-CANDIDATE.md.

@@ -1,4 +1,4 @@
-# Network Diagnostics Center
+# DNS Benchmark / Network Intelligence Platform
 
 Self-hosted network diagnostics for an authorized private network. Single
 controller (FastAPI, React, SQLite) with optional outbound-only agents.
@@ -7,23 +7,24 @@ the service directly to the Internet.
 
 ## Modules
 
-DNS Benchmark (UDP/TCP, DoH2/H3, DoT, DoQ; Cold/Warm/Both), DNS Inspector,
-Connectivity, TLS Inspector, Route Analyzer, Monitoring, Agents,
+DNS Benchmark (UDP/TCP, DoH2/H3, DoT, DoQ; Cold/Warm/Both), Providers,
+DNS Inspector, Connectivity, TLS Inspector, Route Analyzer, Monitoring, Agents,
 Smart Diagnostics, AdGuard Home read-only integration and bounded HTTP download.
+Network Intelligence: DNS Intelligence, Observatory, Time Machine, Global
+Intelligence (remote and explicitly authorized peer measurements), DNS Integrity,
+Protocol Laboratory, Internet Atlas, Website X-Ray, Network Twin, Scenario
+Builder and Chaos Lab. Optional functionality is gated and subject to documented
+measurement limitations. See [integration candidate](docs/INTEGRATION-CANDIDATE.md).
 
 ## Isolated CasaOS preview
 
-Use deploy/compose.preview-rel01.yaml on port 8113, **not** the old live
-installation on 8099. Create the separate writable directory:
-```sh
-sudo install -d -m 700 -o 10001 -g 10001 /DATA/AppData/dns-benchmark-preview-rel01
-```
-Open the direct local IP and port to create the first owner in the browser. Existing owner-password files or NDC_OWNER_PASSWORD remain supported. The new account stores a salted scrypt verifier in /data/owner-account.json (0600). First-run setup is limited to direct private-network requests; do not expose an unconfigured instance to the Internet, even through Docker NAT. By default direct local HTTP uses a non-Secure cookie, other requests use Secure cookies; explicit NDC_SECURE_COOKIE=0 or 1 overrides this. Use verified HTTPS for normal operation. A writable /data mount is required.
-Import the preview compose only after its CI publishes the image. HTTP
-preview requires explicit NDC_SECURE_COOKIE=0 and a trusted LAN, firewall
-or private overlay. For normal operation use a verified HTTPS reverse proxy,
-set NDC_ORIGIN to the exact HTTPS origin, and keep secure cookies enabled.
-Restrict network exposure and outbound target scope. No root or NET_RAW needed.
+Use [deploy/compose.acceptance.yaml](deploy/compose.acceptance.yaml) and the exact
+source/image instructions in [the acceptance record](docs/INTEGRATION-CANDIDATE.md).
+Port 8113 binds loopback by default; use an explicitly restricted trusted LAN
+address for mobile testing. Separate data directory; never replace the existing
+installation on 8099. No published preview image is assumed. Create the first
+owner in the browser on the isolated instance; use verified HTTPS for normal
+operation. The preview HTTP cookie override is not a production setting.
 
 Explicit NDC_ALLOWED_CIDRS permits non-global targets; e.g. an authorized
 single AdGuard IP /32. This is application validation, not a firewall.
@@ -31,7 +32,10 @@ Metadata/link-local destinations stay denied. Agents require local endpoint
 allowlists and verified HTTPS; see docs/DIST-01.md and docs/DIST-02.md.
 Optional Telegram and AdGuard are disabled until configured. See
 docs/MON-01.md and docs/INT-01.md. Full certificates chain and ICMP/route
-availability depend on runtime. No independent DNSSEC validation.
+availability depend on runtime. DNSSEC positive-chain verification requires an
+independently supplied trusted root DNSKEY and explicit delegation chain; negative
+proofs and client leak testing are not implemented. Chaos packet tests are local
+loopback fixtures, not external network impairment.
 
 ## Data and operational safety
 
