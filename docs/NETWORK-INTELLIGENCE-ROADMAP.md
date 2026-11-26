@@ -129,6 +129,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05C1 | backend/API passed / visual CI failed (45775704394) | owner launch and cancellation forms, bounded matrix, retry fixture |
 | NIP-05C2a | implemented / CI passed (45783493054) | accessible launch labels, bounded claim refresh, rotated peer priority |
 | NIP-05C2b | planned | active-session load, RTT cancellation/restart hardening and physical acceptance |
-| NIP-06A/B | implemented candidate / CI pending | resolver agreement, controlled DNSSEC behavior, pinned-key signature check and UI; no root-chain or client leak claim |
-| NIP-07A/B | implemented candidate / CI pending | configured endpoint laboratory, fixed workload, child deadline, matched transport/reuse comparison and UI |
-| NIP-06C, NIP-07C, NIP-08..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-06A/B | implemented / CI passed (45783888520) | resolver agreement, controlled DNSSEC behavior, pinned-key signature check and UI; no root-chain or client leak claim |
+| NIP-07A/B | implemented / CI passed (45784324206) | configured endpoint laboratory, fixed workload, child deadline, matched transport/reuse comparison and UI |
+| NIP-08A/B, NIP-09A/B | implemented candidate / CI pending | opt-in fixed-provider Atlas, bounded HEAD X-Ray, both workspaces |
+| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

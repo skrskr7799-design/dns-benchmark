@@ -54,7 +54,7 @@ def tls_wrap(raw,host,stack,protocols):
     ctx.set_alpn_protocols(protocols)
     return stack.enter_context(ctx.wrap_socket(raw,server_hostname=host))
 
-def probe_once(host,port,family,kind,path="/",ip=None,dns_ms=None):
+def probe_once(host,port,family,kind,path="/",ip=None,dns_ms=None,*,capture_headers=False):
     out=base(host,port,family)
     start=time.monotonic()
     try:
@@ -124,6 +124,9 @@ def probe_once(host,port,family,kind,path="/",ip=None,dns_ms=None):
                     raise ValueError("Unsupported HTTP status")
                 out["http_status"]=status
                 out["headers_ms"]=ms(t)
+                if capture_headers:
+                    from ..web_xray import header_projection
+                    out.update(header_projection(bytes(data).split(b"\r\n\r\n",1)[0]))
             out["stage"]="complete"
             out["ok"]=True
     except Exception as exc:

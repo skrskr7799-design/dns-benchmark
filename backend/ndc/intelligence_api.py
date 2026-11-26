@@ -12,6 +12,8 @@ from .dns_intelligence import rank
 from .observatory import analyze
 from .dns_integrity import Agreement,DNSSECCheck,agreement,dnssec_check
 from .protocol_lab import LabProfile,capability as lab_capability,run as lab_run
+from .internet_atlas import AtlasRequest,run as atlas_run,enabled as atlas_enabled
+from .web_xray import XRayRequest,run as xray_run
 import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
@@ -44,6 +46,25 @@ def protocol_lab_run(body:LabProfile):
     try:return lab_run(body)
     except PermissionError:raise HTTPException(403,"Endpoint not authorized for laboratory") from None
     except (ValueError,RuntimeError):raise HTTPException(409,"Laboratory unavailable") from None
+    finally:inspection_slot.release()
+
+@router.get("/atlas")
+def atlas_config():
+    return {"enabled":atlas_enabled(),"providers":["IANA RDAP bootstrap","RIR RDAP","RIPEstat"],"cache_seconds":600}
+
+@router.post("/atlas")
+def atlas_lookup(body:AtlasRequest):
+    if not inspection_slot.acquire(blocking=False):raise HTTPException(409,"Network inspection already running")
+    try:return atlas_run(body)
+    except PermissionError:raise HTTPException(403,"Atlas provider access disabled") from None
+    except (ValueError,RuntimeError):raise HTTPException(409,"Atlas lookup unavailable") from None
+    finally:inspection_slot.release()
+
+@router.post("/website-xray")
+def website_xray(body:XRayRequest):
+    if not inspection_slot.acquire(blocking=False):raise HTTPException(409,"Network inspection already running")
+    try:return xray_run(body)
+    except (ValueError,RuntimeError):raise HTTPException(409,"Website X-Ray unavailable") from None
     finally:inspection_slot.release()
 
 @router.get("/dns/cohorts")

@@ -104,7 +104,14 @@ export interface DNSSECCheck {endpoint:string;vantage:string;started_at:number;f
 export interface LabConfig {endpoints:string[];max_queries:number;max_seconds:number;max_parallel:number;max_count:number;corpus:string[];warmup:string}
 export interface LabProfile {endpoints:string[];families:('ipv4'|'ipv6')[];modes:('cold'|'warm')[];count:number;parallel:1|2}
 export interface LabResult {methodology:string;profile:LabProfile;profile_key:string|null;vantage:string;status:'completed'|'deadline';started_at:number;finished_at:number;planned_queries:number;rows:(Result&{family:string;expected_protocol:string;transport_matched:boolean;samples:Sample[];warmup:{ok:boolean;error:string|null}|null})[];comparisons:{endpoint:string;family:string;status:string;warm_minus_cold_p50_ms:number|null}[];limitations:string[]}
+export interface AtlasReport {target:string;family:string;resolved_ip:string|null;asn:number|null;started_at:number;finished_at:number;data:Record<string,{retrieved_at:number;value:Record<string,unknown>}>;errors:Record<string,string>;cached:boolean;limitations:string[]}
+export interface XRayHop extends NetworkProbe {url:string;selected_headers?:Record<string,string[]>;header_presence?:string[]}
+export interface XRayReport {request:{url:string;family:string;follow_redirects:boolean};started_at:number;finished_at:number;status:string;hops:XRayHop[];limitations:string[]}
 export const api = {
+  atlasConfig:(signal?:AbortSignal)=>request<{enabled:boolean;providers:string[];cache_seconds:number}>('/api/v1/intelligence/atlas',{signal}),
+  atlasLookup:(body:{target:string;family:'ipv4'|'ipv6'})=>request<AtlasReport>('/api/v1/intelligence/atlas',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+  xray:(body:{url:string;family:'ipv4'|'ipv6';follow_redirects:boolean})=>request<XRayReport>('/api/v1/intelligence/website-xray',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+
   labConfig:(signal?:AbortSignal)=>request<LabConfig>('/api/v1/intelligence/protocol-lab',{signal}),
   labRun:(body:LabProfile)=>request<LabResult>('/api/v1/intelligence/protocol-lab',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
 

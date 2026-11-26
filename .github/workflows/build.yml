@@ -75,6 +75,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_dns_integrity.py
       - name: Protocol Laboratory bounded worker and real UDP corpus
         run: docker exec -i benchmark python - < tests/test_protocol_lab.py
+      - name: Internet Atlas and Website X-Ray scope, metadata and redirects
+        run: docker exec -i benchmark python - < tests/test_atlas_xray.py
       - name: Connectivity and TLS integration
         run: docker exec -i benchmark python - < tests/test_network.py
       - name: Route analyzer integration
