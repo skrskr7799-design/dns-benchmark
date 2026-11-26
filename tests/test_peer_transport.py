@@ -12,7 +12,7 @@ from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID,ExtendedKeyUsageOID
 from backend.ndc.peer_contract import PeerDirection,RTTPlan,LocalGrants
-from backend.ndc.peer_transport import Receiver,measure
+from backend.ndc.peer_transport import Receiver,measure,PeerDenied
 import ipaddress
 
 def authority(root):
@@ -115,7 +115,12 @@ class Tests(unittest.TestCase):
             with self.assertRaises(RuntimeError):r.serve_once(cancel)
     def test_unapproved_bind(self):
         a,b,d,p,g=self.setup_direction()
-        with self.assertRaises(Exception):
+        with self.assertRaises(PeerDenied):
             Receiver("127.0.0.1",d.port,g,cert=b[0],key=b[1],ca=self.ca)
+    def test_exclusive_live_listener(self):
+        a,b,d,p,g=self.setup_direction()
+        with Receiver(d.destination_ip,d.port,g,cert=b[0],key=b[1],ca=self.ca):
+            with self.assertRaises(OSError):
+                Receiver(d.destination_ip,d.port,g,cert=b[0],key=b[1],ca=self.ca)
 
 if __name__=="__main__":unittest.main()

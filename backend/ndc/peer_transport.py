@@ -119,6 +119,10 @@ class Receiver:
         self.listener=socket.socket(family(self.ip),socket.SOCK_STREAM)
         self.used=False
         try:
+            # Permit explicit successive one-shot sessions after TCP TIME_WAIT.
+            # Never use SO_REUSEPORT: an already listening socket must retain
+            # exclusive ownership of the configured endpoint.
+            self.listener.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
             self.listener.bind(address(self.ip,port));self.listener.listen(1);self.listener.setblocking(False)
         except BaseException:
             self.listener.close();raise

@@ -547,9 +547,11 @@ logout=urllib.request.Request(base+"/api/auth/logout",data=b"",headers={"X-CSRF-
 with opener.open(logout,timeout=10) as response:
     assert not json.load(response)["authenticated"]
 expect_error(urllib.request.Request(base+"/api/status"),401)
-for _ in range(9):
+# The earlier successful login may have aged out during the explicit
+# integration-phase cooldown. Exercise the entire 10-attempt budget.
+for _ in range(10):
     bad=urllib.request.Request(base+"/api/auth/login",data=b'{"password":"wrong"}',headers={"Content-Type":"application/json","X-NDC-Request":"1"})
-    # Browser tests have also logged in; global budget may already be exhausted.
+    # Earlier requests may have consumed some of the sliding-window budget.
     try:
         opener.open(bad,timeout=10)
     except urllib.error.HTTPError as exc:
