@@ -263,6 +263,9 @@ from pathlib import Path
 from backend.ndc.agent_client import Agent
 from unittest.mock import patch
 expect_error(urllib.request.Request(base+"/api/v1/agents/machine/poll",data=b'{}',headers={"Content-Type":"application/json"}),403)
+v2_poll_path="/api/v1/agents/machine/v2/poll"
+v2_poll_body={"version":"2","engine":"python-network-v2","capabilities":["dns"]}
+expect_error(urllib.request.Request(base+v2_poll_path,data=json.dumps(v2_poll_body).encode(),headers={"Content-Type":"application/json"}),403)
 invite=request("/api/v1/agents/invite",{"name":"CI agent","location":"loopback"})
 with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):
     root=Path(tmp)
@@ -271,7 +274,7 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
         sock.bind(("127.0.0.1",0))
         sock.settimeout(10)
         endpoint=f"udp://127.0.0.1:{sock.getsockname()[1]}"
-        agent=Agent(root,base,[endpoint])
+        agent=Agent(root,base,[endpoint],protocol_v2=True)
         try:
             agent.enroll()
             assert not (root/"enrollment-token").exists()
@@ -291,9 +294,14 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
             assert detail["state"]=="completed",detail
             assert detail["payload"]["results"][0]["ok"]==1
             assert not agent.spool.exists()
+            caps=request("/api/v1/agents/capabilities")
+            assert caps["dispatchable"]==["dns"]
+            claimed=next(a for a in caps["agents"] if a["id"]==invite["id"])
+            assert claimed["fresh"] and claimed["dispatchable"]==["dns"] and claimed["version"]=="2"
             assert request("/api/v1/agents")["agents"][0]["online"]
             request("/api/v1/agents/"+invite["id"]+"/revoke",{})
             assert agent.post("poll",{"version":"1","engine":"python-dns02"}).status_code==401
+            assert agent.post("v2/poll",v2_poll_body).status_code==401
         finally:
             agent.client.close()
 print("Outbound agent and real DNS smoke passed")

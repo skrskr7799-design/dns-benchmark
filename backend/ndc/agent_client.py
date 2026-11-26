@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
-from .agent_contract import AgentRun, ENGINE, VERSION
+from .agent_contract import AgentRun, ENGINE, VERSION, PROTOCOL_V2, ENGINE_V2
 from .probes.dns import measure, measure_both
 
 def atomic(path,value):
@@ -51,7 +51,7 @@ def execute(task,allowed,cancel=None):
     return rows
 
 class Agent:
-    def __init__(self,root,url,allowed):
+    def __init__(self,root,url,allowed,*,protocol_v2=False):
         self.root=Path(root);self.url=controller_url(url);self.allowed=frozenset(allowed)
         self.root.mkdir(mode=0o700,parents=True,exist_ok=True)
         self.identity=self.root/"identity.json"
@@ -59,6 +59,7 @@ class Agent:
         self.client=httpx.Client(timeout=10,trust_env=False,follow_redirects=False,
                                  verify=os.getenv("NDC_AGENT_CA_FILE") or True)
         self.credential=None
+        self.protocol_v2=protocol_v2
 
     def post(self,path,body,auth=True):
         headers={"Authorization":"Bearer "+self.credential} if auth else {}
@@ -100,9 +101,15 @@ class Agent:
     def step(self):
         if not self.flush():
             return
-        r=self.post("poll",{"version":VERSION,"engine":ENGINE})
+        if self.protocol_v2:
+            r=self.post("v2/poll",{"version":PROTOCOL_V2,"engine":ENGINE_V2,"capabilities":["dns"]})
+        else:
+            r=self.post("poll",{"version":VERSION,"engine":ENGINE})
         r.raise_for_status()
-        task=r.json()["task"]
+        reply=r.json()
+        if self.protocol_v2 and reply.get("version")!=PROTOCOL_V2:
+            raise ValueError("Unsupported controller contract")
+        task=reply["task"]
         if not task:
             return
         import re
@@ -162,7 +169,9 @@ def main():
         raise ValueError("Provide 1–100 explicitly approved resolver endpoints")
     for endpoint in allowed:
         AgentRun(endpoints=[endpoint])
-    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed).run()
+    mode=os.getenv("NDC_AGENT_PROTOCOL","1")
+    if mode not in ("1","2"):raise ValueError("Unsupported agent protocol")
+    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2").run()
 
 if __name__=="__main__":
     main()

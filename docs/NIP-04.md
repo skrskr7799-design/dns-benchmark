@@ -30,3 +30,5 @@ Owner wants server acceptance after completing development and merging. See [ser
 
 ## NIP-04C3 — strict shared-CA TLS fixture (candidate)
 C2 head 7541859 / run 45753346652 failed at second TLS verification after all-four-DB backup/restore and schedule recovery, job 139686076149. Loopback route passed again. Two self-signed trust anchors had identical subject names; ambiguous issuer selection is a fixture defect candidate, not established application defect. Replace with one dedicated test CA and two distinct non-CA server leaves signed by that CA, SAN localhost, proper key usage, SKI/AKI, serverAuth EKU. Trust only the CA; keep strict hostname/chain verification, exact fingerprints, two handshakes and replay assertions. No production TLS settings changed. Exact-head CI and browser/visual acceptance still pending. NIP-05 design documented separately; agent implementation remains gated on green.
+
+C3 exact head 13eba0875f0086335052c10d577dedb40d7ebade / run 45753872223 completed success including scheduled TLS rotation, four-DB backup replay, loopback route and browser matrix. Post-polish screenshot inspection and production acceptance remain open.

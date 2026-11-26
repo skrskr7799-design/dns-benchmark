@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch
+from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch, PollV2
 from .agent_store import AgentError
 
 router=APIRouter(prefix="/api/v1/agents")
@@ -24,6 +24,10 @@ def credential(request):
 def list_agents(request:Request):
     s=store(request)
     return {"agents":s.list(),"tasks":s.tasks()}
+
+@router.get("/capabilities")
+def capabilities(request:Request):
+    return store(request).capability_list()
 
 @router.post("/invite",status_code=201)
 def invite(request:Request,body:Enrollment):
@@ -75,6 +79,10 @@ def enroll(request:Request,body:Enroll):
 @router.post("/machine/poll")
 def poll(request:Request,body:Heartbeat):
     return call(store(request).poll,credential(request),body)
+
+@router.post("/machine/v2/poll")
+def poll_v2(request:Request,body:PollV2):
+    return call(store(request).poll_v2,credential(request),body)
 
 @router.post("/machine/results/{id}")
 def complete(request:Request,id:str,body:Result):

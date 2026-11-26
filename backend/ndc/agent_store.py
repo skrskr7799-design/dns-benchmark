@@ -8,7 +8,7 @@ import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
-from .agent_contract import ENGINE, VERSION, AgentRun
+from .agent_contract import ENGINE, VERSION, AgentRun, PROTOCOL_V2, CAPABILITY_TTL, DISPATCHABLE_V2
 from .agent_evidence import records,encode
 
 class AgentError(Exception):
@@ -40,7 +40,7 @@ class AgentStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1):
+            if version not in (0,1,2):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -73,6 +73,41 @@ class AgentStore:
                 PRAGMA user_version=1;
                 COMMIT;
                 """)
+
+            if version<2:
+                c.executescript("""
+                BEGIN IMMEDIATE;
+                ALTER TABLE tasks ADD COLUMN contract_version TEXT NOT NULL DEFAULT '1'
+                    CHECK(contract_version IN ('1','2'));
+                ALTER TABLE tasks ADD COLUMN probe_kind TEXT NOT NULL DEFAULT 'dns'
+                    CHECK(probe_kind IN ('dns','tcp','tls','http','route'));
+                CREATE TABLE agent_capabilities(
+                    agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+                    version TEXT NOT NULL CHECK(version='2'),
+                    engine TEXT NOT NULL CHECK(engine='python-network-v2'),
+                    capabilities TEXT NOT NULL,reported_at REAL NOT NULL);
+                PRAGMA user_version=2;
+                COMMIT;
+                """)
+
+    def capability_list(self):
+        with self.db() as c:
+            now=self.clock()
+            output=[]
+            for row in c.execute("""SELECT a.id,a.name,a.location,a.revoked,a.credential IS NOT NULL AS enrolled,
+                a.last_seen,c.version,c.engine,c.capabilities,c.reported_at
+                FROM agents a LEFT JOIN agent_capabilities c ON c.agent_id=a.id ORDER BY a.name,a.id"""):
+                r=dict(row)
+                fresh=bool(r["enrolled"] and not r["revoked"] and r["reported_at"] is not None
+                    and 0<=now-r["reported_at"]<CAPABILITY_TTL)
+                claims=json.loads(r["capabilities"]) if r["capabilities"] is not None else []
+                r["capabilities"]=claims
+                r["fresh"]=fresh
+                r["dispatchable"]=[k for k in DISPATCHABLE_V2 if fresh and k in claims]
+                r["provenance"]="agent_claim" if r["version"] is not None else "unreported"
+                output.append(r)
+            return {"server_version":PROTOCOL_V2,"dispatchable":list(DISPATCHABLE_V2),
+                "capability_ttl_seconds":CAPABILITY_TTL,"agents":output}
 
     def pending_evidence(self):
         with self.db() as c:
@@ -151,6 +186,7 @@ class AgentStore:
             if not c.execute("UPDATE agents SET revoked=1,credential=NULL,enrollment=NULL,enroll_until=NULL WHERE id=? AND revoked=0",(id,)).rowcount:
                 raise AgentError(404,"Active agent not found")
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
+            c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
             self.audit(c,id,"revoked")
 
     def rotate(self,id):
@@ -160,6 +196,7 @@ class AgentStore:
             if not c.execute("UPDATE agents SET credential=NULL,enrollment=?,enroll_until=?,last_seen=NULL,engine=NULL WHERE id=? AND revoked=0",(digest(token),self.clock()+600,id)).rowcount:
                 raise AgentError(404,"Active agent not found")
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
+            c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
             self.audit(c,id,"rotated")
         return {"id":id,"token":token,"expires_at":self.clock()+600}
 
@@ -242,27 +279,45 @@ class AgentStore:
             n=c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE id IN (SELECT task_id FROM batch_members WHERE batch_id=?) AND state IN ('queued','leased')",(self.clock(),id)).rowcount
             return {"cancelled":n}
 
+    def lease_dns(self,c,id):
+        if c.execute("SELECT 1 FROM tasks WHERE agent_id=? AND state='leased'",(id,)).fetchone():
+            return None
+        r=c.execute("""SELECT * FROM tasks WHERE agent_id=? AND state='queued'
+            AND contract_version='1' AND probe_kind='dns' ORDER BY created,id LIMIT 1""",(id,)).fetchone()
+        if not r:return None
+        lease=secret();until=self.clock()+300
+        c.execute("UPDATE tasks SET state='leased',lease=?,lease_until=? WHERE id=?",(digest(lease),until,r["id"]))
+        return {"id":r["id"],"lease":lease,"lease_seconds":300,"config":json.loads(r["config"]),"version":VERSION,"engine":ENGINE}
+
     def poll(self,credential,heartbeat):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
             id=self.identity(c,credential)
             self.expire(c)
             c.execute("UPDATE agents SET last_seen=?,engine=? WHERE id=?",(self.clock(),heartbeat.engine,id))
-            if c.execute("SELECT 1 FROM tasks WHERE agent_id=? AND state='leased'",(id,)).fetchone():
-                return {"task":None}
-            r=c.execute("SELECT * FROM tasks WHERE agent_id=? AND state='queued' ORDER BY created,id LIMIT 1",(id,)).fetchone()
-            if not r:
-                return {"task":None}
-            lease=secret();until=self.clock()+300
-            c.execute("UPDATE tasks SET state='leased',lease=?,lease_until=? WHERE id=?",(digest(lease),until,r["id"]))
-            return {"task":{"id":r["id"],"lease":lease,"lease_seconds":300,"config":json.loads(r["config"]),"version":VERSION,"engine":ENGINE}}
+            c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
+            return {"task":self.lease_dns(c,id)}
+
+    def poll_v2(self,credential,body):
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            id=self.identity(c,credential)
+            self.expire(c)
+            now=self.clock()
+            c.execute("UPDATE agents SET last_seen=?,engine=? WHERE id=?",(now,ENGINE,id))
+            c.execute("""INSERT INTO agent_capabilities(agent_id,version,engine,capabilities,reported_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(agent_id) DO UPDATE SET
+                version=excluded.version,engine=excluded.engine,capabilities=excluded.capabilities,
+                reported_at=excluded.reported_at""",(id,body.version,body.engine,json.dumps(body.capabilities),now))
+            task=self.lease_dns(c,id) if "dns" in body.capabilities else None
+            return {"version":PROTOCOL_V2,"dispatchable":list(DISPATCHABLE_V2),"task":task}
 
     def heartbeat(self,credential,body):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
             id=self.identity(c,credential)
             c.execute("UPDATE agents SET last_seen=?,engine=? WHERE id=?",(self.clock(),body.engine,id))
-            row=c.execute("SELECT 1 FROM tasks WHERE id=? AND agent_id=? AND lease=? AND state='leased' AND lease_until>?",(body.task_id,id,digest(body.lease),self.clock())).fetchone()
+            row=c.execute("SELECT 1 FROM tasks WHERE id=? AND agent_id=? AND lease=? AND state='leased' AND contract_version='1' AND probe_kind='dns' AND lease_until>?",(body.task_id,id,digest(body.lease),self.clock())).fetchone()
             return {"active":bool(row)}
 
     def complete(self,credential,id,body):
@@ -273,7 +328,7 @@ class AgentStore:
             c.execute("BEGIN IMMEDIATE")
             agent=self.identity(c,credential)
             r=c.execute("SELECT * FROM tasks WHERE id=? AND agent_id=? AND lease=?",(id,agent,digest(body.lease))).fetchone()
-            if not r:
+            if not r or r["contract_version"]!="1" or r["probe_kind"]!="dns":
                 raise AgentError(404,"Task not found")
             if r["state"] in ("completed","failed") and r["payload_hash"]==ph:
                 return {"accepted":True,"duplicate":True}
@@ -298,20 +353,20 @@ class AgentStore:
 
     def cancel(self,id):
         with self.db() as c:
-            if not c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE id=? AND state IN ('queued','leased')",(self.clock(),id)).rowcount:
+            if not c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE id=? AND contract_version='1' AND probe_kind='dns' AND state IN ('queued','leased')",(self.clock(),id)).rowcount:
                 raise AgentError(409,"Task not active")
 
     def tasks(self):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
             self.expire(c)
-            return [dict(r)|{"config":json.loads(r["config"])} for r in c.execute("SELECT id,agent_id,config,state,created,finished FROM tasks ORDER BY created DESC LIMIT 200")]
+            return [dict(r)|{"config":json.loads(r["config"])} for r in c.execute("SELECT id,agent_id,config,state,created,finished FROM tasks WHERE contract_version='1' AND probe_kind='dns' ORDER BY created DESC LIMIT 200")]
 
     def detail(self,id):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
             self.expire(c)
-            r=c.execute("SELECT id,agent_id,config,state,created,finished,payload FROM tasks WHERE id=?",(id,)).fetchone()
+            r=c.execute("SELECT id,agent_id,config,state,created,finished,payload FROM tasks WHERE id=? AND contract_version='1' AND probe_kind='dns'",(id,)).fetchone()
             if not r:
                 raise AgentError(404,"Task not found")
             return dict(r)|{"config":json.loads(r["config"]),"payload":json.loads(r["payload"]) if r["payload"] else None}

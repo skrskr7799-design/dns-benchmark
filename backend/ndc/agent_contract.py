@@ -44,3 +44,23 @@ class Batch(BaseModel):
         if len(set(ids))!=len(ids) or any(not re.fullmatch(r"[a-f0-9]{32}",i) for i in ids):
             raise ValueError("Invalid or duplicate agent IDs")
         return ids
+
+PROTOCOL_V2="2"
+ENGINE_V2="python-network-v2"
+CAPABILITY_TTL=45
+ProbeKind=Literal["dns","tcp","tls","http","route"]
+# Negotiation only; additional probe kinds are not implemented yet.
+DISPATCHABLE_V2=("dns",)
+
+class PollV2(BaseModel):
+    model_config=ConfigDict(extra="forbid",strict=True)
+    version:Literal["2"]
+    engine:Literal["python-network-v2"]
+    capabilities:list[ProbeKind]=Field(max_length=5)
+
+    @field_validator("capabilities")
+    @classmethod
+    def unique_capabilities(cls,values):
+        if len(set(values))!=len(values):
+            raise ValueError("Duplicate capabilities")
+        return sorted(values)

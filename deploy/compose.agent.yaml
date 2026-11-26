@@ -5,6 +5,7 @@ services:
     command: ["python","-m","backend.ndc.agent_client"]
     environment:
       NDC_CONTROLLER_URL: "${NDC_CONTROLLER_URL:?Set verified HTTPS controller origin}"
+      NDC_AGENT_PROTOCOL: "${NDC_AGENT_PROTOCOL:-1}"
       NDC_AGENT_CA_FILE: "${NDC_AGENT_CA_FILE:-}"
       NDC_ALLOWED_CIDRS: "${NDC_ALLOWED_CIDRS:-}"
     volumes:
