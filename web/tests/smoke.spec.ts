@@ -164,9 +164,10 @@ test('agents workspace creates a batch and shows both sites',async({page})=>{
  await page.setViewportSize({width:1280,height:900})
  const ip='https://100.64.0.9:8443',ca='fixture public CA only'
  await page.route('**/api/v1/agents/control-trust',route=>route.fulfill({json:{enabled:true,origin:ip,ca_pem:ca,sha256:'a'.repeat(64)}}))
+ // Hash history preserves /agents across reload; stay on that route.
+ await expect(page).toHaveURL(/#\/agents(?:[/?]|$)/)
  await page.reload()
- await expect(page.getByRole('heading',{name:'Network overview'})).toBeVisible()
- await page.getByRole('link',{name:'Agents',exact:true}).click()
+ await expect(page.getByRole('heading',{name:'Agents',exact:true})).toBeVisible()
  const origin=page.getByRole('textbox',{name:'HTTPS контроллера'})
  await expect(origin).toHaveValue(ip)
  await expect(origin).not.toBeEditable()

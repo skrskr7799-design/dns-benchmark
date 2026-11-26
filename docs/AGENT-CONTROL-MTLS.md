@@ -14,3 +14,5 @@ CI 45825983994 passed real TLS enrollment, certificate renewal, migration v1 and
 
 ## Browser acceptance correction
 Run 45836985310 passed all executed backend checks and the dedicated mTLS wizard browser test. The eleventh browser login was rejected by the intended ten-attempt limiter (HTTP 429 in controller logs), causing the subsequent integrations test to fail before navigation. Run both agent workspace cases in a single authenticated browser context, reload with the explicit mTLS trust fixture, retain all assertions, and keep production login limits unchanged. Full exact-head CI and physical VPS acceptance pending.
+
+Run 45856539613 confirmed all ten browser logins returned 200 and backend checks passed. The combined wizard step incorrectly expected the Overview heading after reload although TanStack hash history preserves /agents. Assert the Agents URL and heading instead; keep all download and responsive assertions and production security unchanged. Exact-head CI pending.
