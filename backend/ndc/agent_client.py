@@ -63,6 +63,7 @@ class Agent:
         self.credential=None
         self.protocol_v2=protocol_v2
         self.approvals=tuple(approvals)
+        self.peer=None
 
     def post(self,path,body,auth=True):
         headers={"Authorization":"Bearer "+self.credential} if auth else {}
@@ -112,6 +113,7 @@ class Agent:
     def step(self):
         if not self.flush():
             return
+        if self.peer is not None and self.peer.step():return
         if self.protocol_v2:
             supported={a.config.kind for a in self.approvals if a.config.kind!="route"}
             if any(a.config.kind=="route" for a in self.approvals):
@@ -207,11 +209,20 @@ class Agent:
         with open(self.root/"agent.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             self.enroll()
+            peer_file=self.root/"peer-directions.json"
+            if peer_file.exists() or peer_file.is_symlink():
+                if not self.protocol_v2:raise ValueError("Peer runtime requires protocol 2")
+                from .peer_runtime import PeerRuntime
+                identity=json.loads(self.identity.read_text())
+                def peer_post(path,body):
+                    return self.client.post(self.url+"/api/v1/agents/machine/peer/"+path,json=body,
+                        headers={"Authorization":"Bearer "+self.credential},timeout=2)
+                self.peer=PeerRuntime(self.root,identity["id"],peer_post,atomic)
             delay=5
             while True:
                 try:
                     self.step()
-                    delay=5
+                    delay=2 if self.peer is not None else 5
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code==401:
                         print("Agent authorization rejected; rotate and re-enroll",flush=True)

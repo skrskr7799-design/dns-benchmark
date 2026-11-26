@@ -47,6 +47,9 @@ async def lifespan(app):
         app.state.monitor_scheduler=scheduler
         app.state.agents=AgentStore(store.path.with_name('agents.sqlite'))
         app.state.agents.initialize()
+        peer_mode=os.getenv("NDC_PEER_ENABLED","0")
+        if peer_mode not in ("0","1"):raise ValueError("Invalid NDC_PEER_ENABLED")
+        app.state.agents.peer_enabled=peer_mode=="1"
         drain=EvidenceDrain(store,monitors,evidence,agent=app.state.agents)
         app.state.evidence_drain=drain
         coordinator.start()

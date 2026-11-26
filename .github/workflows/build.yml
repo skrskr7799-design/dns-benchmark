@@ -101,6 +101,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_peer_coordination.py
       - name: Gated peer control API, one-shot grant relay and restart denial
         run: docker exec -i benchmark python - < tests/test_peer_api.py
+      - name: Two-agent peer runtime, actual mTLS and durable evidence
+        run: docker exec -i benchmark python - < tests/test_peer_runtime.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules

@@ -13,7 +13,7 @@ ACTIVE=("queued","preparing","ready","running")
 MAX_HISTORY=2048
 CLAIM_TTL=45
 PREPARE_SECONDS=20
-READY_SECONDS=10
+READY_SECONDS=15
 QUEUE_SECONDS=120
 RETENTION=30*86400
 
@@ -42,7 +42,7 @@ def direction_key(d):
     return digest(d.model_dump(mode="json"))
 
 class PeerCoordination:
-    # Test gate only. No deployment switch or automatic agent integration.
+    # Disabled by default; explicit controller opt-in required.
     peer_enabled=False
 
     def peer_reserved(self,c,id):
