@@ -95,6 +95,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_distributed_compare.py
       - name: Peer RTT local authorization and bounded result contract
         run: docker exec -i benchmark python - < tests/test_peer_contract.py
+      - name: Direct peer RTT real mutual TLS and replay denial
+        run: docker exec -i benchmark python - < tests/test_peer_transport.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules
