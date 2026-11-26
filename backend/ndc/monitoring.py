@@ -368,11 +368,15 @@ class MonitorScheduler:
         self.thread.join(10)
 
     def tick(self):
+        if self.stop_event.is_set():return
+        acquire=getattr(self.slot,'acquire_background',None)
+        if acquire is None:acquire=lambda:self.slot.acquire(blocking=False)
         if time.monotonic()>=self.next_prune:
             self.store.prune()
             self.next_prune=time.monotonic()+3600
-        if self.slot.acquire(blocking=False):
+        if acquire():
             try:
+                if self.stop_event.is_set():return
                 row=self.store.claim()
                 if row:
                     try:
@@ -389,8 +393,9 @@ class MonitorScheduler:
         # After giving the monitor lane first opportunity, offer one bounded
         # scheduled snapshot per minute, using the identical inspection slot.
         if self.snapshot_schedules is not None and not self.stop_event.is_set() and time.monotonic()>=self.next_snapshot_tick:
-            if self.slot.acquire(blocking=False):
+            if acquire():
                 try:
+                    if self.stop_event.is_set():return
                     self.snapshot_schedules.tick()
                     self.next_snapshot_tick=time.monotonic()+60
                 finally:

@@ -16,7 +16,8 @@ from .models import DiagnosticConfig
 from .diagnostics import diagnose
 
 router=APIRouter()
-inspection_slot=threading.BoundedSemaphore(1)
+from .inspection_gate import InspectionGate
+inspection_slot=InspectionGate()
 event_slots=asyncio.Semaphore(8)
 
 def services(request):

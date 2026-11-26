@@ -18,11 +18,14 @@ class Coordinator:
         self.thread=None
 
     def start(self):
+        if self.thread is not None:raise RuntimeError('Coordinator already started')
         self.thread=threading.Thread(target=self.loop,daemon=True,name="ndc-coordinator")
         self.thread.start()
 
     def submit(self, config, legacy=False):
-        job_id=self.store.create(config,legacy)
+        with self.lock:
+            if self.stop_event.is_set():raise RuntimeError('Coordinator stopping')
+            job_id=self.store.create(config,legacy)
         self.wake.set()
         return job_id
 
@@ -35,8 +38,8 @@ class Coordinator:
         return job
 
     def stop(self):
-        self.stop_event.set()
         with self.lock:
+            self.stop_event.set()
             if self.cancel_event is not None:
                 self.cancel_event.set()
         self.wake.set()
@@ -46,7 +49,9 @@ class Coordinator:
     def loop(self):
         while not self.stop_event.is_set():
             try:
-                job_id=self.store.claim()
+                with self.lock:
+                    if self.stop_event.is_set():break
+                    job_id=self.store.claim()
                 if job_id:
                     self.execute(job_id)
                 else:

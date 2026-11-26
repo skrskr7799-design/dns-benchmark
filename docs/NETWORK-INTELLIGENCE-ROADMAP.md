@@ -135,7 +135,8 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-10A/B | implemented / CI passed (45785884186) | owner topology revisions, monitor/evidence binding, cycle-safe impact and responsive editor |
 | NIP-11A/B, NIP-12A/B | implemented / CI passed (45787223492) | manual read-only scenario DAG, revision-pinned reports, synthetic fault model and workspaces |
 | NIP-13A | implemented / CI job passed (45787805056) | mobile drawer reconciliation, known controller database backup/restore, acceptance gap register |
-| NIP-13B1 | implemented candidate / CI pending | RTT terminal quarantine, goodput receipt quarantine, shared clock guard and regression tests |
+| NIP-13B1 | implemented / CI passed (45788074879) | RTT terminal quarantine, goodput receipt quarantine, shared clock guard and regression tests |
 | NIP-13B2a | implemented candidate / CI pending | bounded worker pipes and actual timeout tests, provider TLS/IP binding and RDAP validation |
 | NIP-13B2b | implemented candidate / CI pending | verified machine request budgets and reserved active continuation lane |
-| NIP-06C, NIP-07C, NIP-08C, NIP-09C, NIP-10C, NIP-11C, NIP-12C, NIP-13B3.. | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
+| NIP-13B scheduler consolidation | implemented candidate / CI pending | bounded background reservation, shutdown admission guard |
+| NIP-13C/D/E | planned | close remaining documented functional gaps or agree deferred scope; design and final acceptance | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

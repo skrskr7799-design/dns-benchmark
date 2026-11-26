@@ -72,6 +72,16 @@ class JobsTest(unittest.TestCase):
         self.assertEqual(len(result["results"]),1)
         self.assertEqual(len(self.store.history()),1)
 
+    def test_stopped_coordinator_cannot_admit_or_claim(self):
+        c=Coordinator(self.store)
+        job=self.store.create(CONFIG)
+        c.stop()
+        with self.assertRaises(RuntimeError):c.submit(CONFIG)
+        c.start();c.thread.join(2)
+        self.assertFalse(c.thread.is_alive())
+        self.assertEqual(self.store.get(job)["status"],"queued")
+        with self.assertRaises(RuntimeError):c.start()
+
     def test_queued_cancel_and_profile(self):
         job=self.store.create(CONFIG)
         self.assertEqual(self.store.cancel(job)["status"],"cancelled")
