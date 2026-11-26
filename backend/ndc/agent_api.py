@@ -30,6 +30,12 @@ def list_agents(request:Request):
 def capabilities(request:Request):
     return store(request).capability_list()
 
+@router.get("/control-trust")
+def control_trust(request:Request):
+    authority=getattr(request.app.state,"agent_authority",None)
+    if authority is None:return {"enabled":False}
+    return {"enabled":True,"origin":f"https://{authority.ip}:8443","ca_pem":authority.ca_pem,"sha256":authority.ca_fingerprint}
+
 @router.post("/invite",status_code=201)
 def invite(request:Request,body:Enrollment):
     return call(store(request).invite,body.name,body.location)
@@ -107,6 +113,11 @@ def cancel(request:Request,id:str):
 # Machine-only routes use separate middleware limits and credentials.
 @router.post("/machine/enroll")
 def enroll(request:Request,body:Enroll):
+    if request.scope.get("ndc_agent_tls"):
+        authority=getattr(request.app.state,"agent_authority",None)
+        if authority is None or body.csr is None:raise HTTPException(422,"Client CSR required")
+        return call(store(request).enroll,body.token,body.csr,authority)
+    if body.csr is not None:raise HTTPException(422,"CSR requires dedicated agent TLS listener")
     return call(store(request).enroll,body.token)
 
 @router.post("/machine/poll")

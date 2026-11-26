@@ -13,6 +13,7 @@ from .agent_evidence import records,encode
 from .remote_contract import CONFIG,config_key,validate_remote,project_remote
 from .evidence import canonical
 from .distributed import DISPATCH_WINDOW,compare as compare_remote_batch
+from .agent_control_pki import peer_fingerprint
 
 class AgentError(Exception):
     def __init__(self,status,message):
@@ -55,7 +56,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3,4,5,6):
+            if version not in (0,1,2,3,4,5,6,7):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -124,6 +125,12 @@ class AgentStore(PeerCoordination,GoodputCoordination):
             if version<6:
                 c.executescript("BEGIN IMMEDIATE;"+SESSION_SCHEMA+"PRAGMA user_version=6;COMMIT;")
 
+            if version<7:
+                c.executescript("""BEGIN IMMEDIATE;
+                    ALTER TABLE agents ADD COLUMN control_fingerprint TEXT;
+                    ALTER TABLE agents ADD COLUMN control_expires REAL;
+                    PRAGMA user_version=7;COMMIT;""")
+
     def capability_list(self):
         with self.db() as c:
             now=self.clock()
@@ -177,7 +184,8 @@ class AgentStore(PeerCoordination,GoodputCoordination):
             self.audit(c,id,"invite")
         return {"id":id,"token":token,"expires_at":self.clock()+600}
 
-    def enroll(self,token):
+    def enroll(self,token,csr=None,authority=None):
+        if (csr is None)!=(authority is None):raise AgentError(422,"CSR and authority required together")
         credential=secret()
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
@@ -185,9 +193,14 @@ class AgentStore(PeerCoordination,GoodputCoordination):
             if not r:
                 raise AgentError(401,"Invalid enrollment")
             id=r[0]
-            c.execute("UPDATE agents SET credential=?,enrollment=NULL,enroll_until=NULL WHERE id=?",(digest(credential),id))
-            self.audit(c,id,"enrolled")
-        return {"id":id,"credential":credential,"version":VERSION}
+            certificate=pin=expires=None
+            if authority is not None:
+                certificate,pin,expires=authority.sign_client(id,csr)
+            c.execute("UPDATE agents SET credential=?,enrollment=NULL,enroll_until=NULL,control_fingerprint=?,control_expires=? WHERE id=?",(digest(credential),pin,expires,id))
+            self.audit(c,id,"enrolled mtls" if pin else "enrolled")
+        result={"id":id,"credential":credential,"version":VERSION}
+        if certificate:result.update(certificate=certificate,certificate_expires=expires)
+        return result
 
     def rate_identity(self,credential):
         # Read-only preflight. Every route still authenticates in its own
@@ -200,6 +213,9 @@ class AgentStore(PeerCoordination,GoodputCoordination):
         r=c.execute("SELECT * FROM agents WHERE credential=? AND revoked=0",(digest(credential),)).fetchone()
         if not r:
             raise AgentError(401,"Invalid agent credential")
+        pin=peer_fingerprint.get()
+        if r["control_fingerprint"]!=pin or (pin is not None and (r["control_expires"] is None or self.clock()>=r["control_expires"])):
+            raise AgentError(401,"Invalid agent certificate binding")
         return r["id"]
 
     def expire(self,c):
@@ -223,12 +239,12 @@ class AgentStore(PeerCoordination,GoodputCoordination):
     def list(self):
         with self.db() as c:
             return [dict(r)|{"online":not r["revoked"] and r["last_seen"] is not None and self.clock()-r["last_seen"]<45}
-                    for r in c.execute("SELECT id,name,location,revoked,last_seen,engine,enroll_until,credential IS NOT NULL AS enrolled FROM agents ORDER BY name,id")]
+                    for r in c.execute("SELECT id,name,location,revoked,last_seen,engine,enroll_until,control_fingerprint IS NOT NULL AS mtls,control_expires,credential IS NOT NULL AS enrolled FROM agents ORDER BY name,id")]
 
     def revoke(self,id):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
-            if not c.execute("UPDATE agents SET revoked=1,credential=NULL,enrollment=NULL,enroll_until=NULL WHERE id=? AND revoked=0",(id,)).rowcount:
+            if not c.execute("UPDATE agents SET revoked=1,credential=NULL,enrollment=NULL,enroll_until=NULL,control_fingerprint=NULL,control_expires=NULL WHERE id=? AND revoked=0",(id,)).rowcount:
                 raise AgentError(404,"Active agent not found")
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
@@ -239,7 +255,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
         token=secret()
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE")
-            if not c.execute("UPDATE agents SET credential=NULL,enrollment=?,enroll_until=?,last_seen=NULL,engine=NULL WHERE id=? AND revoked=0",(digest(token),self.clock()+600,id)).rowcount:
+            if not c.execute("UPDATE agents SET credential=NULL,enrollment=?,enroll_until=?,last_seen=NULL,engine=NULL,control_fingerprint=NULL,control_expires=NULL WHERE id=? AND revoked=0",(digest(token),self.clock()+600,id)).rowcount:
                 raise AgentError(404,"Active agent not found")
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))

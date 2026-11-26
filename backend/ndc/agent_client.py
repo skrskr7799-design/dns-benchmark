@@ -12,6 +12,7 @@ from .agent_contract import AgentRun, ENGINE, VERSION, PROTOCOL_V2, ENGINE_V2
 from .probes.dns import measure, measure_both
 from .remote_contract import CONFIG,RemoteResult,config_key
 from .remote_worker import load_approvals,run_probe,route_capabilities
+from .agent_control_pki import client_context,client_csr
 
 def atomic(path,value):
     temp=path.with_suffix(".tmp")
@@ -58,14 +59,30 @@ class Agent:
         self.root.mkdir(mode=0o700,parents=True,exist_ok=True)
         self.identity=self.root/"identity.json"
         self.spool=self.root/"spool.json"
-        self.client=httpx.Client(timeout=10,trust_env=False,follow_redirects=False,
-                                 verify=os.getenv("NDC_AGENT_CA_FILE") or True)
+        mode=os.getenv("NDC_AGENT_MTLS","0")
+        if mode not in ("0","1"):raise ValueError("Invalid agent TLS mode")
+        self.mtls=mode=="1"
+        self.ca_file=os.getenv("NDC_AGENT_CA_FILE")
+        self.control_key=self.root/"control-key.pem"
+        if self.mtls and (not self.ca_file or not self.url.startswith("https://") or not protocol_v2):
+            raise ValueError("mTLS requires HTTPS, trusted CA file and protocol 2")
+        self.client=self.new_client()
         self.credential=None
         self.protocol_v2=protocol_v2
         self.approvals=tuple(approvals)
         self.peer=None
         self.goodput=None
         self.peer_turn=0
+
+    def new_client(self,certificate=None):
+        verify=client_context(self.ca_file,self.control_key,certificate) if self.mtls else self.ca_file or True
+        return httpx.Client(timeout=10,trust_env=False,follow_redirects=False,verify=verify)
+
+    def use_certificate(self,certificate):
+        if not self.mtls or not certificate:raise ValueError("Missing control certificate")
+        new=self.new_client(certificate)
+        self.client.close()
+        self.client=new
 
     def post(self,path,body,auth=True):
         headers={"Authorization":"Bearer "+self.credential} if auth else {}
@@ -76,14 +93,22 @@ class Agent:
             saved=json.loads(self.identity.read_text())
             if saved["controller"]!=self.url:
                 raise ValueError("Identity belongs to a different controller")
+            if self.mtls:self.use_certificate(saved.get("certificate"))
+            elif saved.get("certificate"):raise ValueError("Control identity requires mTLS")
             self.credential=saved["credential"]
             return
         token_file=self.root/"enrollment-token"
         token=token_file.read_text().strip()
-        r=self.post("enroll",{"token":token},False)
+        body={"token":token}
+        if self.mtls:body["csr"]=client_csr(self.control_key)
+        r=self.post("enroll",body,False)
         r.raise_for_status()
         value=r.json()
-        atomic(self.identity,{"controller":self.url,"id":value["id"],"credential":value["credential"]})
+        saved={"controller":self.url,"id":value["id"],"credential":value["credential"]}
+        if self.mtls:
+            self.use_certificate(value.get("certificate"))
+            saved.update(certificate=value["certificate"],certificate_expires=value["certificate_expires"])
+        atomic(self.identity,saved)
         self.credential=value["credential"]
         token_file.unlink()
 

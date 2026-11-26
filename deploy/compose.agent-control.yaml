@@ -1,0 +1,7 @@
+# Combine with compose.yaml; bind only to the actual NetBird host IPv4.
+services:
+  benchmark:
+    environment:
+      NDC_AGENT_MTLS_IP: "${NDC_AGENT_MTLS_IP:?Set controller NetBird IPv4}"
+    ports:
+      - "${NDC_AGENT_MTLS_IP:?Set controller NetBird IPv4}:8443:8443"

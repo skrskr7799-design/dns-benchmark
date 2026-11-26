@@ -16,6 +16,7 @@ class Enrollment(BaseModel):
 
 class Enroll(BaseModel):
     token: str=Field(min_length=40,max_length=128)
+    csr: str|None=Field(default=None,max_length=4096)
 
 class Heartbeat(BaseModel):
     version: Literal["1"]="1"

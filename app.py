@@ -22,6 +22,9 @@ from backend.ndc.monitor_api import router as monitor_router
 from backend.ndc.security import Security, guard, router as auth_router
 from backend.ndc.scope import allowed_networks
 from backend.ndc.agent_store import AgentStore
+from backend.ndc.agent_control_pki import Authority
+from backend.ndc.agent_control_listener import agent_listener
+from contextlib import AsyncExitStack
 from backend.ndc.agent_api import router as agent_router
 from backend.ndc.peer_api import router as peer_router
 from backend.ndc.integration_api import router as integration_router
@@ -66,11 +69,16 @@ async def lifespan(app):
         app.state.agents.goodput_enabled=app.state.agents.goodput_session_enabled=goodput_mode=="1"
         drain=EvidenceDrain(store,monitors,evidence,agent=app.state.agents)
         app.state.evidence_drain=drain
+        control_ip=os.getenv("NDC_AGENT_MTLS_IP","").strip()
+        app.state.agent_authority=Authority(store.path.parent,control_ip) if control_ip else None
         coordinator.start()
         scheduler.start()
         drain.start()
         try:
-            yield
+            async with AsyncExitStack() as stack:
+                if app.state.agent_authority is not None:
+                    await stack.enter_async_context(agent_listener(app,app.state.agent_authority))
+                yield
         finally:
             scheduler.stop()
             coordinator.stop()
