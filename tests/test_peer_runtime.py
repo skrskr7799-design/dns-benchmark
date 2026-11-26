@@ -120,4 +120,65 @@ class Tests(unittest.TestCase):
             path.chmod(0o644)
             with self.assertRaises(ValueError):Journal(path,atomic)
 
+    def test_goodput_real_end_to_end(self):
+        from backend.ndc.peer_throughput_runtime import GoodputAgentRuntime
+        from backend.ndc.peer_throughput import ThroughputPlan,ThroughputPolicy
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_ALLOWED_CIDRS":"127.0.0.0/8","NDC_OWNER_PASSWORD":"test-owner-password-long","NDC_SECURE_COOKIE":"0","NDC_ORIGIN":""}):
+            root=Path(tmp);s=AgentStore(root/"agents.sqlite");s.initialize()
+            s.peer_enabled=s.goodput_enabled=s.goodput_session_enabled=True
+            nodes=[s.enroll(s.invite(n,"fixture")["token"]) for n in ("A","B")]
+            ca_path,ca,key=authority(root)
+            certs=[leaf(root,1,"127.0.0.1",ca,key),leaf(root,2,"127.0.0.2",ca,key)]
+            with socket.socket() as sock:
+                sock.bind(("127.0.0.2",0));port=sock.getsockname()[1]
+            d=PeerDirection(source_agent_id=nodes[0]["id"],destination_agent_id=nodes[1]["id"],
+                source_ip="127.0.0.1",destination_ip="127.0.0.2",port=port,
+                source_certificate=certs[0][2],destination_certificate=certs[1][2])
+            p=ThroughputPlan(request_id="b"*32,policy=ThroughputPolicy(direction=d,byte_count=65536,rate_bps=1000000))
+            app=FastAPI();app.state.agents=s;app.state.security=Security(root)
+            app.middleware("http")(guard);app.include_router(router);app.include_router(auth_router)
+            clients=[];runtimes=[];errors=[]
+            try:
+                owner=TestClient(app,base_url="http://127.0.0.1");clients.append(owner)
+                login=owner.post("/api/auth/login",json={"password":"test-owner-password-long"},headers={"X-NDC-Request":"1"})
+                self.assertEqual(login.status_code,200,login.text)
+                csrf={"X-CSRF-Token":login.json()["csrf"]}
+                self.assertEqual(owner.post("/api/v1/agents/goodput-requests",json=p.model_dump(mode="json")).status_code,403)
+                for i,node in enumerate(nodes):
+                    folder=root/str(i);folder.mkdir()
+                    atomic(folder/"peer-throughput.json",[p.policy.model_dump(mode="json")])
+                    for name,path in (("peer-cert.pem",certs[i][0]),("peer-key.pem",certs[i][1]),("peer-ca.pem",ca_path)):
+                        target=folder/name;target.write_bytes(path.read_bytes());target.chmod(0o600)
+                    client=TestClient(app,base_url="http://127.0.0.1");clients.append(client)
+                    def post(path,body,client=client,node=node):
+                        return client.post("/api/v1/agents/machine/goodput/"+path,json=body,headers={"Authorization":"Bearer "+node["credential"]})
+                    runtime=GoodputAgentRuntime(folder,node["id"],post,atomic);runtimes.append(runtime)
+                    self.assertFalse(runtime.step())
+                self.assertEqual(owner.post("/api/v1/agents/goodput-requests",json=p.model_dump(mode="json"),headers=csrf).status_code,202)
+                self.assertEqual(owner.post("/api/v1/agents/machine/goodput/offer",json={}).status_code,403)
+                self.assertEqual(clients[1].get("/api/v1/agents/goodput-requests").status_code,401)
+                def receive():
+                    try:runtimes[1].step()
+                    except Exception as exc:errors.append(type(exc).__name__)
+                worker=threading.Thread(target=receive,daemon=True);worker.start()
+                until=time.monotonic()+5
+                while s.goodput_detail(p.request_id)["state"]!="ready" and time.monotonic()<until:time.sleep(.025)
+                self.assertEqual(s.goodput_detail(p.request_id)["state"],"ready")
+                self.assertTrue(runtimes[0].step())
+                worker.join(12);self.assertFalse(worker.is_alive());self.assertEqual(errors,[])
+                detail=owner.get("/api/v1/agents/goodput-requests/"+p.request_id).json()
+                self.assertEqual(detail["state"],"completed",detail)
+                self.assertEqual(detail["source_report"],detail["receiver_report"])
+                self.assertNotIn("receiver_lease",detail)
+                obs,_=decode(s.pending_evidence()["payload"])
+                self.assertEqual((obs[0].source_part,obs[0].outcome),("peer-goodput-v1","success"))
+                self.assertGreater(next(m.value for m in obs[0].measurements if m.name=="application_goodput"),0)
+                for runtime in runtimes:
+                    restored=GoodputAgentRuntime(runtime.local.root,runtime.agent_id,runtime.post,atomic)
+                    self.assertFalse(restored.journal.begin(p.request_id))
+                    self.assertIsNone(restored.journal.data["pending"])
+                print("Real two-agent paced mTLS goodput through owner/machine API and evidence verified")
+            finally:
+                for c in clients:c.close()
+
 if __name__=="__main__":unittest.main()

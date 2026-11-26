@@ -24,8 +24,12 @@ def private_regular(path,limit,private=True):
 class Journal:
     # The outer agent.lock serializes all operations. Atomic write fsyncs file
     # and directory. No auto-pruning: fail closed when the bounded ledger fills.
-    def __init__(self,path,atomic):
-        self.path=path;self.atomic=atomic
+    def __init__(self,path,atomic,finish_model=None):
+        self.path=path;self.atomic=atomic;self.poisoned=False
+        if finish_model is None:
+            from .peer_api import Finish
+            finish_model=Finish
+        self.finish_model=finish_model
         if path.exists() or path.is_symlink():
             private_regular(path,2*1024*1024)
             self.data=json.loads(path.read_text())
@@ -35,13 +39,16 @@ class Journal:
                 or len(set(ids))!=len(ids) or set(self.data)!={"version","ids","pending"}):
                 raise ValueError("Invalid peer journal")
             if self.data["pending"] is not None:
-                from .peer_api import Finish
-                p=Finish.model_validate(self.data["pending"])
+                p=self.finish_model.model_validate(self.data["pending"])
                 if p.id not in ids:raise ValueError("Untracked peer result")
         else:self.data={"version":1,"ids":[],"pending":None}
 
     def commit(self,value):
-        self.atomic(self.path,value)
+        if self.poisoned:raise RuntimeError("Peer journal persistence failed")
+        try:self.atomic(self.path,value)
+        except Exception:
+            self.poisoned=True
+            raise
         self.data=value
 
     def begin(self,id):
@@ -53,8 +60,7 @@ class Journal:
         return True
 
     def finish(self,body):
-        from .peer_api import Finish
-        b=Finish.model_validate(body)
+        b=self.finish_model.model_validate(body)
         if b.id not in self.data["ids"] or self.data["pending"] is not None:raise RuntimeError("Invalid peer result")
         self.commit(self.data|{"pending":b.model_dump(mode="json")})
 

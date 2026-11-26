@@ -1,4 +1,4 @@
-"""Local goodput execution boundary; controller dispatch deliberately absent.
+"""Local goodput execution boundary and explicitly opted-in control client.
 
 Call only while holding the existing exclusive agent.lock, including across
 process restarts. The local operator owns the private policy and state files.
@@ -10,7 +10,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from .peer_runtime import private_regular, MAX_LOCAL_IDS
+from .peer_runtime import private_regular, MAX_LOCAL_IDS, Journal
 from .peer_transport import checked_ip, credentials
 from .peer_throughput import (ThroughputPolicy, ThroughputPlan, ThroughputGrants,
     ThroughputReceiver, measure_throughput, MAX_BYTES)
@@ -156,3 +156,68 @@ class ThroughputRuntime:
                     return receiver.serve_once(cancel)
             finally:
                 grants.revoke_all();timer.cancel()
+
+
+class GoodputAgentRuntime:
+    """Same exclusive agent.lock as DNS and RTT; no parallel background job."""
+    def __init__(self,root,agent_id,post,atomic):
+        from .peer_api import GoodputFinish
+        self.local=ThroughputRuntime(root,agent_id,atomic)
+        self.agent_id=agent_id;self.post=post
+        self.journal=Journal(Path(root)/"goodput-journal.json",atomic,GoodputFinish)
+
+    def call(self,path,body):
+        response=self.post(path,body);response.raise_for_status()
+        return response.json()
+
+    def flush(self):
+        body=self.journal.data["pending"]
+        if body is None:return True
+        response=self.post("finish",body)
+        if response.status_code in (200,404,409,422):
+            self.journal.clear();return True
+        response.raise_for_status()
+        return False
+
+    def step(self):
+        from .peer_api import Leased,RequestID,Ready
+        if not self.flush():return True
+        claims=self.post("claims",{"policies":[p.model_dump(mode="json") for p in self.local.policies]})
+        if claims.status_code==409:return False  # optional server feature disabled
+        claims.raise_for_status()
+        offer=self.call("offer",{})["offer"]
+        if offer is None:return False
+        id=RequestID(id=offer["id"]).id;role=offer["role"]
+        if role not in ("receiver","source"):raise ValueError("Unknown goodput role")
+        if not self.journal.begin(id):return True
+        start=time.monotonic()
+        reply=self.call("prepare" if role=="receiver" else "start",{"id":id})
+        plan=ThroughputPlan.model_validate(reply["plan"]);lease=reply["lease"];d=plan.direction
+        Leased(id=id,lease=lease)
+        if plan.request_id!=id or plan.policy not in self.local.policies or (d.destination_agent_id if role=="receiver" else d.source_agent_id)!=self.agent_id:
+            raise PermissionError("Local goodput policy rejected")
+        cancel=threading.Event();done=threading.Event()
+        def active():
+            try:return self.call("status",{"id":id,"lease":lease})["active"] is True
+            except Exception:return False
+        def monitor():
+            while not done.wait(.5):
+                if not active():cancel.set();return
+        def ready(token):
+            self.call("ready",Ready(id=id,lease=lease,grant=token).model_dump(mode="json"))
+        timer=threading.Timer(max(0,10-(time.monotonic()-start)),cancel.set);timer.daemon=True
+        worker=threading.Thread(target=monitor,daemon=True)
+        timer.start();worker.start()
+        report=None
+        try:
+            if not active() or cancel.is_set():return True
+            if role=="receiver":report,_=self.local.receiver(plan,cancel,ready)
+            else:
+                token=Ready(id=id,lease=lease,grant=reply["grant"]).grant
+                report,_=self.local.source(plan,token,cancel)
+        finally:
+            done.set();worker.join(3);timer.cancel()
+        if not cancel.is_set() and report is not None:
+            self.journal.finish({"id":id,"lease":lease,"report":report.model_dump(mode="json")})
+            self.flush()
+        return True
