@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test'
-const screens=[['/','overview','Network overview'],['/benchmark','benchmark','DNS Benchmark'],['/providers','providers','DNS Providers'],['/intelligence','intelligence','DNS Intelligence'],['/observatory','observatory','Network Observatory'],['/time-machine','time-machine','Network Time Machine'],['/inspector','inspector','DNS Inspector'],['/connectivity','connectivity','Connectivity'],['/tls','tls','TLS Inspector'],['/routes','routes','Route Analyzer'],['/diagnostics','diagnostics','Smart Diagnostics'],['/monitoring','monitoring','Monitoring'],['/history','history','История'],['/agents','agents','Agents'],['/integrations','integrations','Integrations'],['/settings','settings','Settings']]
+const screens=[['/','overview','Network overview'],['/benchmark','benchmark','DNS Benchmark'],['/providers','providers','DNS Providers'],['/intelligence','intelligence','DNS Intelligence'],['/observatory','observatory','Network Observatory'],['/time-machine','time-machine','Network Time Machine'],['/global','global','Global Intelligence'],['/inspector','inspector','DNS Inspector'],['/connectivity','connectivity','Connectivity'],['/tls','tls','TLS Inspector'],['/routes','routes','Route Analyzer'],['/diagnostics','diagnostics','Smart Diagnostics'],['/monitoring','monitoring','Monitoring'],['/history','history','История'],['/agents','agents','Agents'],['/integrations','integrations','Integrations'],['/settings','settings','Settings']]
 const sizes=[[1536,1024],[1536,864],[768,1024],[390,844],[320,800]]
 test('Obsidian responsive matrix',async({page},info)=>{
  test.setTimeout(360000)
@@ -58,6 +58,10 @@ test('Obsidian responsive matrix',async({page},info)=>{
  const nodes=['London fixture','Berlin fixture','Helsinki fixture'].map((name,i)=>({id:String(i+1).repeat(32),name,location:'Fixture site '+(i+1),revoked:0,enrolled:1,online:i!==2,last_seen:1764000000,engine:'python-dns02',enroll_until:null}))
  await page.route('**/api/v1/agents',r=>r.fulfill({json:{agents:nodes,tasks:[]}}))
  await page.route('**/api/v1/agents/batches',r=>r.fulfill({json:[]}))
+ await page.route('**/api/v1/agents/remote-batches',r=>r.fulfill({json:[]}))
+ await page.route('**/api/v1/agents/global-matrix',r=>r.fulfill({json:{attempts:[
+ {id:'a'.repeat(32),kind:'rtt',source_id:nodes[0].id,destination_id:nodes[1].id,created:1764000000,finished:1764000002,state:'completed',value:12.34,matched_samples:3,profile:{samples:3},source_ip:'192.0.2.1',destination_ip:'192.0.2.2',port:8443,method:'tls-echo-rtt-v1'},
+ {id:'b'.repeat(32),kind:'goodput',source_id:nodes[1].id,destination_id:nodes[0].id,created:1764000000,finished:1764000003,state:'completed',value:765432,matched_samples:null,profile:{byte_count:65536,rate_bps:1000000},source_ip:'192.0.2.2',destination_ip:'192.0.2.1',port:8443,method:'tls-paced-goodput-v1'}],coverage:{rtt:{enabled:true,truncated:false,attempts_read:1},goodput:{enabled:true,truncated:false,attempts_read:1}},time_basis:'controller_admission_and_receipt',provenance:'agent_claim',limit_per_kind:200}}))
  await page.route('**/api/v1/integrations',r=>r.fulfill({json:{adguard_configured:true,throughput_configured:true}}))
  await page.route('**/api/v1/integrations/adguard',r=>r.fulfill({json:{configured:true,errors:{},at:1764000000,version:'fixture',protection_enabled:true,running:true,queries:12345,blocked:2345,mean_ms:15.4,upstreams:['https://resolver.example.test','https://second.example.test'],upstreams_omitted:0,upstream_timings:[{upstream:'https://resolver.example.test',mean_ms:12.4},{upstream:'https://second.example.test',mean_ms:18.1}],time_units:'hours'}}))
  await page.route('**/api/v1/integrations/throughput',r=>r.fulfill({json:{bytes:8388608,duration_ms:320,mbps:209.715,reason:'byte_limit',body_started:true,byte_limit:8388608,vantage:'container',method:'bounded-http-download'}}))
@@ -115,6 +119,14 @@ test('Obsidian responsive matrix',async({page},info)=>{
   await page.goto('/#/agents')
   await expect(page.getByText('Helsinki fixture',{exact:true})).toBeVisible()
   await capture('agents')
+  await page.goto('/#/global')
+  await page.getByRole('button',{name:'London fixture → Berlin fixture',exact:true}).click()
+  await expect(page.getByRole('heading',{name:'London fixture → Berlin fixture',exact:true})).toBeVisible()
+  await expect(page.getByRole('table',{name:'Направленная матрица'})).toContainText('12.34 мс')
+  await capture('global-rtt')
+  await page.getByRole('button',{name:'Throughput',exact:true}).click()
+  await expect(page.getByRole('table',{name:'Направленная матрица'})).toContainText('0.77 Мбит/с')
+  await capture('global-goodput')
   await page.goto('/#/integrations')
   await page.getByRole('button',{name:'Обновить статистику',exact:true}).click()
   await expect(page.getByText('12345',{exact:true})).toBeVisible()

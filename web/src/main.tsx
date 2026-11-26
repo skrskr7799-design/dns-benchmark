@@ -4,6 +4,7 @@ import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import {createRootRoute,createRoute,createRouter,createHashHistory,RouterProvider,Outlet,Link} from '@tanstack/react-router'
 import {Benchmark} from './features/benchmark'
 import {DNSIntelligence} from './features/intelligence'
+import {GlobalIntelligence} from './features/global-intelligence'
 import {Observatory} from './features/observatory'
 import {TimeMachine} from './features/time-machine'
 import {Providers} from './features/providers'
@@ -25,7 +26,7 @@ applyAppearance(readAppearance())
 const client=new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:true}}})
 const navGroups=[
  {title:'WORKSPACE',items:[['/','Overview','overview'],['/benchmark','DNS Benchmark','benchmark'],['/providers','Providers','dns'],['/inspector','DNS Inspector','search'],['/connectivity','Connectivity','route'],['/tls','TLS Inspector','lock'],['/routes','Routes','route'],['/diagnostics','Smart Diagnostics','activity']]},
- {title:'INTELLIGENCE',items:[['/intelligence','DNS Intelligence','intelligence'],['/observatory','Network Observatory','activity'],['/time-machine','Network Time Machine','history']]},
+ {title:'INTELLIGENCE',items:[['/intelligence','DNS Intelligence','intelligence'],['/observatory','Network Observatory','activity'],['/time-machine','Network Time Machine','history'],['/global','Global Intelligence','agents']]},
  {title:'MONITORING',items:[['/monitoring','Monitoring','activity'],['/history','История','history'],['/agents','Agents','agents']]},
  {title:'SYSTEM',items:[['/integrations','Integrations','integrations'],['/settings','Settings','settings']]}
 ] as const
@@ -38,6 +39,7 @@ const indexRoute=createRoute({getParentRoute:()=>rootRoute,path:'/',component:Ov
 const benchmarkRoute=createRoute({getParentRoute:()=>rootRoute,path:'/benchmark',component:Benchmark})
 const intelligenceRoute=createRoute({getParentRoute:()=>rootRoute,path:'/intelligence',component:DNSIntelligence})
 const observatoryRoute=createRoute({getParentRoute:()=>rootRoute,path:'/observatory',component:Observatory})
+const globalRoute=createRoute({getParentRoute:()=>rootRoute,path:'/global',component:GlobalIntelligence})
 const timeMachineRoute=createRoute({getParentRoute:()=>rootRoute,path:'/time-machine',component:TimeMachine})
 const providersRoute=createRoute({getParentRoute:()=>rootRoute,path:'/providers',component:Providers})
 const inspectorRoute=createRoute({getParentRoute:()=>rootRoute,path:'/inspector',component:Inspector})
@@ -50,6 +52,6 @@ const diagnosticsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/diagnost
 const integrationsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/integrations',component:Integrations})
 const settingsRoute=createRoute({getParentRoute:()=>rootRoute,path:'/settings',component:Settings})
 const historyRoute=createRoute({getParentRoute:()=>rootRoute,path:'/history',component:History})
-const router=createRouter({routeTree:rootRoute.addChildren([indexRoute,benchmarkRoute,intelligenceRoute,observatoryRoute,timeMachineRoute,providersRoute,inspectorRoute,connectivityRoute,tlsRoute,routesRoute,monitoringRoute,agentsRoute,diagnosticsRoute,integrationsRoute,settingsRoute,historyRoute]),history:createHashHistory()})
+const router=createRouter({routeTree:rootRoute.addChildren([indexRoute,benchmarkRoute,intelligenceRoute,observatoryRoute,timeMachineRoute,globalRoute,providersRoute,inspectorRoute,connectivityRoute,tlsRoute,routesRoute,monitoringRoute,agentsRoute,diagnosticsRoute,integrationsRoute,settingsRoute,historyRoute]),history:createHashHistory()})
 declare module '@tanstack/react-router' {interface Register {router:typeof router}}
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><AuthGate><RouterProvider router={router}/></AuthGate></QueryClientProvider>)

@@ -89,7 +89,16 @@ export interface SnapshotMonitorDiff {monitor_id:string;kind:string;before_name:
 export type SnapshotDiff={methodology:'monitor-diff-v1';before_id:string;after_id:string;changes:SnapshotMonitorDiff[];limitations:string[]}|{methodology:'probe-diff-v1';scope:SnapshotScope;before_id:string;after_id:string;changes:SnapshotField[];limitations:string[]}
 export interface SnapshotSchedule {id:string;config:{label:string;interval_seconds:number;probe:SnapshotProbe|null};enabled:boolean;running:boolean;next_at:number;last_at:number|null;last_status:string|null;last_error:string|null;last_snapshot_id:string|null;runs:number;errors:number}
 const tm='/api/v1/intelligence/time-machine'
+export interface GlobalAttempt {id:string;kind:'rtt'|'goodput';source_id:string;destination_id:string;created:number;finished:number|null;state:string;value:number|null;matched_samples:number|null;profile:{samples?:number;byte_count?:number;rate_bps?:number};source_ip:string;destination_ip:string;port:number;method:string}
+export interface GlobalMatrix {attempts:GlobalAttempt[];coverage:Record<'rtt'|'goodput',{enabled:boolean;truncated:boolean;attempts_read:number}>;time_basis:string;provenance:string;limit_per_kind:number}
+export interface GlobalBatch {id:string;created:number;config:{kind:string;host:string;family:string};total:number;finished:number}
+export interface GlobalBatchDetail extends GlobalBatch {counts:Record<string,number>;members:{agent_id:string;name:string;state:string;comparison_exclusion:string|null;observation:{outcome:string;address?:string|null;total_ms?:number|null}|null}[];pairs:{left_agent_id:string;right_agent_id:string;status:string;reason:string;phase_deltas_ms:Record<string,number|null>;fields:Record<string,{left:unknown;right:unknown;status:string}>;hops:unknown[]}[];limitations:string[]}
 export const api = {
+  globalMatrix:(signal?:AbortSignal)=>request<GlobalMatrix>('/api/v1/agents/global-matrix',{signal}),
+  globalBatches:(signal?:AbortSignal)=>request<GlobalBatch[]>('/api/v1/agents/remote-batches',{signal}),
+  globalBatch:(id:string,signal?:AbortSignal)=>request<GlobalBatchDetail>('/api/v1/agents/remote-batches/'+encodeURIComponent(id),{signal}),
+  cancelGlobalAttempt:(kind:'rtt'|'goodput',id:string)=>request<{cancelled:boolean}>('/api/v1/agents/'+(kind==='rtt'?'peer-requests':'goodput-requests')+'/'+encodeURIComponent(id)+'/cancel',{method:'POST',body:'{}'}),
+
   snapshotList:(before?:number,signal?:AbortSignal)=>request<SnapshotPage>(tm+'/snapshots?limit=100'+(before===undefined?'':'&before='+before),{signal}),
   snapshotDetail:(id:string,signal?:AbortSignal)=>request<SnapshotDetail>(tm+'/snapshots/'+encodeURIComponent(id),{signal}),
   snapshotCompare:(older:string,newer:string,signal?:AbortSignal)=>request<SnapshotDiff>(tm+'/compare?'+new URLSearchParams({older,newer}),{signal}),

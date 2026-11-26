@@ -180,3 +180,40 @@ async def goodput_status(request:Request):
 async def goodput_finish(request:Request):
     s=goodput_store(request);cred=credential(request);b=await body(request,GoodputFinish)
     return await run_in_threadpool(call,s.goodput_finish,cred,b.id,b.lease,b.report)
+
+
+@router.get("/global-matrix")
+def global_matrix(request:Request):
+    """Bounded owner-only view; latest attempts, not a synchronized benchmark."""
+    s=request.app.state.agents
+    with s.db() as c:
+        c.execute("BEGIN IMMEDIATE");s.expire(c)
+        rows=[];coverage={}
+        for kind,table,enabled in (
+            ("rtt","peer_requests",s.peer_enabled),
+            ("goodput","goodput_requests",s.peer_enabled and s.goodput_enabled and s.goodput_session_enabled)):
+            # Fixed internal table names; never provided by the caller.
+            records=c.execute("SELECT * FROM "+table+" ORDER BY created DESC,id DESC LIMIT 201").fetchall()
+            coverage[kind]={"enabled":enabled,"truncated":len(records)>200,"attempts_read":min(len(records),200)}
+            for r in records[:200]:
+                if kind=="rtt":
+                    plan=RTTPlan.model_validate_json(r["plan"])
+                    d=plan.direction;profile={"samples":plan.samples};value=None;matched=None
+                    if r["state"]=="completed" and r["outcome"] in ("success","partial") and r["source_report"]:
+                        report=RTTReport.model_validate_json(r["source_report"])
+                        observed=report.summary()["rtt_ms"]
+                        if report.plan==plan and len(observed)==r["receiver_echoes"] and observed:
+                            matched=len(observed);value=sum(observed)/matched
+                else:
+                    plan=ThroughputPlan.model_validate_json(r["plan"])
+                    d=plan.direction;profile={"byte_count":plan.policy.byte_count,"rate_bps":plan.policy.rate_bps}
+                    value=None;matched=None
+                    if r["state"]=="completed" and r["source_report"] and r["source_report"]==r["receiver_report"]:
+                        report=ThroughputReport.model_validate_json(r["source_report"])
+                        if report.plan==plan:value=report.summary()["application_goodput_bps"]
+                rows.append({"id":r["id"],"kind":kind,"source_id":r["source_id"],"destination_id":r["destination_id"],
+                    "created":r["created"],"finished":r["finished"],"state":r["state"],"value":value,
+                    "matched_samples":matched,"profile":profile,"source_ip":d.source_ip,"destination_ip":d.destination_ip,
+                    "port":d.port,"method":plan.method})
+        return {"attempts":rows,"coverage":coverage,"time_basis":"controller_admission_and_receipt",
+            "provenance":"agent_claim","limit_per_kind":200}

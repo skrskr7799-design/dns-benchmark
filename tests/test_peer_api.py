@@ -89,4 +89,22 @@ class Tests(unittest.TestCase):
         self.assertFalse(self.send(self.b,"status",{"id":self.id,"lease":receiver})["active"])
         self.send(self.a,"start",{"id":self.id},409)
 
+    def test_global_matrix_owner_only_and_reconciled(self):
+        path="/api/v1/agents/global-matrix"
+        self.assertEqual(self.machine.get(path).status_code,401)
+        empty=self.owner.get(path).json()
+        self.assertEqual(empty["attempts"],[])
+        self.assertFalse(empty["coverage"]["rtt"]["enabled"])
+        receiver=self.ready()
+        start=self.send(self.a,"start",{"id":self.id})
+        self.assertIsNone(self.owner.get(path).json()["attempts"][0]["value"])
+        report=RTTReport(plan=self.plan,samples=[RTTSample(index=1,status="echo",rtt_ms=2.)])
+        self.send(self.a,"finish",{"id":self.id,"lease":start["lease"],"report":report.model_dump(mode="json")})
+        self.assertIsNone(self.owner.get(path).json()["attempts"][0]["value"])
+        self.send(self.b,"finish",{"id":self.id,"lease":receiver,"echoes":1})
+        result=self.owner.get(path)
+        self.assertEqual(result.json()["attempts"][0]["value"],2.)
+        self.assertEqual(result.json()["attempts"][0]["matched_samples"],1)
+        for secret in (receiver,start["lease"],self.grant):self.assertNotIn(secret,result.text)
+
 if __name__=="__main__":unittest.main()
