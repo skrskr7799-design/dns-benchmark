@@ -16,6 +16,7 @@ from cryptography.x509.oid import NameOID,ExtendedKeyUsageOID
 # Set only by the TLS protocol adapter, not HTTP headers. AnyIO copies
 # context into FastAPI's synchronous workers.
 peer_fingerprint=ContextVar("ndc_control_peer_fingerprint",default=None)
+peer_public_key=ContextVar("ndc_control_peer_public_key",default=None)
 PKI_FILE="agent-control-pki.json"
 UTC=dt.timezone.utc
 
@@ -97,12 +98,14 @@ class Authority:
         if ip is not None:builder=builder.add_extension(x509.SubjectAlternativeName([x509.IPAddress(ip)]),critical=False)
         return builder.sign(self.key,hashes.SHA256())
 
-    def sign_client(self,agent_id,csr_pem):
+    def sign_client(self,agent_id,csr_pem,expected_key=None):
         if len(csr_pem)>4096:raise ValueError("CSR too large")
         csr=x509.load_pem_x509_csr(csr_pem.encode("ascii"))
         public=csr.public_key()
         if not isinstance(public,ec.EllipticCurvePublicKey) or not isinstance(public.curve,ec.SECP256R1) or not csr.is_signature_valid:
             raise ValueError("Invalid P-256 CSR")
+        if expected_key is not None and public_bytes(public)!=expected_key:
+            raise ValueError("Renewal must use the authenticated local key")
         # Ignore all requested subject/extensions; only controller chooses identity.
         cert=self.leaf(public,agent_id,ExtendedKeyUsageOID.CLIENT_AUTH,90)
         return pem(cert),cert.fingerprint(hashes.SHA256()).hex(),cert.not_valid_after_utc.timestamp()
@@ -131,6 +134,7 @@ def client_context(ca_file,key_file=None,certificate=None):
     ctx.minimum_version=ctx.maximum_version=ssl.TLSVersion.TLSv1_3
     ctx.load_verify_locations(cafile=str(ca_file))
     if certificate is not None:
+        private_read(key_file)
         with tempfile.TemporaryDirectory() as directory:
             p=Path(directory)/"leaf"
             private_write(p,certificate.encode("ascii"))

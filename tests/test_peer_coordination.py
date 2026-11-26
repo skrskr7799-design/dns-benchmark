@@ -121,6 +121,9 @@ class Tests(unittest.TestCase):
 
     def test_migration(self):
         with self.s.db() as c:
+            c.execute("DROP TABLE agent_control_renewal")
+            c.execute("ALTER TABLE agents DROP COLUMN control_fingerprint")
+            c.execute("ALTER TABLE agents DROP COLUMN control_expires")
             c.execute("DROP TABLE goodput_requests");c.execute("DROP TABLE goodput_claims");c.execute("DROP TABLE goodput_clock")
             c.execute("DROP TABLE peer_requests");c.execute("DROP TABLE peer_claims");c.execute("PRAGMA user_version=3")
         self.s.initialize();self.admit()
@@ -184,6 +187,9 @@ class Tests(unittest.TestCase):
     def test_goodput_global_budget_and_migration(self):
         from backend.ndc.peer_throughput import ThroughputPolicy,ThroughputPlan
         with self.s.db() as c:
+            c.execute("DROP TABLE agent_control_renewal")
+            c.execute("ALTER TABLE agents DROP COLUMN control_fingerprint")
+            c.execute("ALTER TABLE agents DROP COLUMN control_expires")
             c.execute("DROP TABLE goodput_requests");c.execute("DROP TABLE goodput_claims");c.execute("DROP TABLE goodput_clock");c.execute("PRAGMA user_version=4")
         self.s.initialize();self.goodput_claims()
         pairs=[]

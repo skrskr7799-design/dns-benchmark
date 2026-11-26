@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from .agent_contract import Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch, PollV2
+from .agent_contract import ControlRenewal, Enrollment, Enroll, Heartbeat, AgentRun, Result, ActiveHeartbeat, Batch, PollV2
 from .agent_store import AgentError
 from .remote_contract import RemoteRequest,RemoteHeartbeat,RemoteResult,RemoteBatch
 
@@ -119,6 +119,12 @@ def enroll(request:Request,body:Enroll):
         return call(store(request).enroll,body.token,body.csr,authority)
     if body.csr is not None:raise HTTPException(422,"CSR requires dedicated agent TLS listener")
     return call(store(request).enroll,body.token)
+
+@router.post("/machine/renew-control")
+def renew_control(request:Request,body:ControlRenewal):
+    authority=getattr(request.app.state,"agent_authority",None)
+    if authority is None or not request.scope.get("ndc_agent_tls"):raise HTTPException(403,"Dedicated agent TLS required")
+    return call(store(request).renew_control,credential(request),body.csr,authority)
 
 @router.post("/machine/poll")
 def poll(request:Request,body:Heartbeat):

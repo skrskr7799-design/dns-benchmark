@@ -73,6 +73,8 @@ class Agent:
         self.peer=None
         self.goodput=None
         self.peer_turn=0
+        self.renew_after=0.0
+        self.control_expires=None
 
     def new_client(self,certificate=None):
         verify=client_context(self.ca_file,self.control_key,certificate) if self.mtls else self.ca_file or True
@@ -93,7 +95,9 @@ class Agent:
             saved=json.loads(self.identity.read_text())
             if saved["controller"]!=self.url:
                 raise ValueError("Identity belongs to a different controller")
-            if self.mtls:self.use_certificate(saved.get("certificate"))
+            if self.mtls:
+                self.use_certificate(saved.get("certificate"))
+                self.control_expires=float(saved["certificate_expires"])
             elif saved.get("certificate"):raise ValueError("Control identity requires mTLS")
             self.credential=saved["credential"]
             return
@@ -108,9 +112,34 @@ class Agent:
         if self.mtls:
             self.use_certificate(value.get("certificate"))
             saved.update(certificate=value["certificate"],certificate_expires=value["certificate_expires"])
+            self.control_expires=float(value["certificate_expires"])
         atomic(self.identity,saved)
         self.credential=value["credential"]
         token_file.unlink()
+
+    def maybe_renew_control(self):
+        if not self.mtls or self.control_expires is None or self.control_expires-time.time()>14*86400 or time.monotonic()<self.renew_after:return
+        self.renew_after=time.monotonic()+3600
+        try:
+            r=self.post("renew-control",{"csr":client_csr(self.control_key)})
+            r.raise_for_status()
+            value=r.json()
+            expires=float(value["certificate_expires"])
+            if not expires>self.control_expires:raise ValueError("Invalid renewal expiry")
+            # Validate key match before committing; persist first so restart can
+            # use the renewed leaf even if the process stops during the swap.
+            new=self.new_client(value["certificate"])
+            try:
+                saved=json.loads(self.identity.read_text())
+                saved.update(certificate=value["certificate"],certificate_expires=expires)
+                atomic(self.identity,saved)
+            except BaseException:
+                new.close()
+                raise
+            old=self.client;self.client=new;self.control_expires=expires;old.close()
+            print("Agent control certificate renewed",flush=True)
+        except Exception as exc:
+            print("Agent certificate renewal retry: "+type(exc).__name__,flush=True)
 
     def flush(self):
         if not self.spool.exists():
@@ -264,6 +293,7 @@ class Agent:
             delay=5
             while True:
                 try:
+                    self.maybe_renew_control()
                     self.step()
                     delay=4 if self.peer is not None or self.goodput is not None else 5
                 except httpx.HTTPStatusError as exc:

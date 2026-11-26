@@ -62,6 +62,9 @@ class Tests(unittest.TestCase):
         task=self.s.enqueue(self.a["id"],self.cfg)["id"]
         lease=self.s.poll(self.a["credential"],Heartbeat())["task"]
         with self.s.db() as c:
+            c.execute("DROP TABLE agent_control_renewal")
+            c.execute("ALTER TABLE agents DROP COLUMN control_fingerprint")
+            c.execute("ALTER TABLE agents DROP COLUMN control_expires")
             c.execute("DROP TABLE goodput_requests");c.execute("DROP TABLE goodput_claims");c.execute("DROP TABLE goodput_clock")
             c.execute("DROP TABLE peer_requests")
             c.execute("DROP TABLE peer_claims")

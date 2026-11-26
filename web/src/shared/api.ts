@@ -34,9 +34,10 @@ export interface MonitorConfig {name:string;host:string;port:number;family:'ipv4
 export interface Observation {outcome:'healthy'|'failed'|'degraded'|'unknown';latency_ms:number|null;reason:string|null;details:Record<string,unknown>}
 export interface Monitor {id:string;config:MonitorConfig;enabled:boolean;running:boolean;state:string;next_at:number;last_at:number|null;last_result:Observation|null}
 export interface MonitorOverview {monitors:Monitor[];incidents:{id:number;monitor_id:string;opened:number;closed:number|null;reason:string;resolution:string|null}[];delivery:Record<string,number>;telegram_enabled:boolean}
-export interface AgentNode {id:string;name:string;location:string;revoked:number;enrolled:number;online:boolean;last_seen:number|null;engine:string|null;enroll_until:number|null}
+export interface AgentNode {id:string;name:string;location:string;revoked:number;enrolled:number;online:boolean;last_seen:number|null;engine:string|null;enroll_until:number|null;mtls?:boolean;control_expires?:number|null}
 export interface AgentTask {id:string;agent_id:string;config:Run;state:string;created:number;finished:number|null}
 export interface AgentOverview {agents:AgentNode[];tasks:AgentTask[]}
+export type AgentControlTrust={enabled:false}|{enabled:true;origin:string;ca_pem:string;sha256:string}
 export interface AgentInvite {id:string;token:string;expires_at:number}
 export interface BatchSummary {id:string;created:number;config:Run;total:number;finished:number}
 export interface RemoteSeries {mode:'cold'|'warm';ip:string|null;protocols:string[];count:number;ok:number;mean:number|null;p95:number|null;p50:number|null;jitter:number|null;warmup_ok:boolean;reused:number;unknown_reuse:number}
@@ -193,6 +194,7 @@ export const api = {
   throughput:()=>request<ThroughputReport>('/api/v1/integrations/throughput',{method:'POST'}),
   diagnose:(config:DiagnosticConfig)=>request<DiagnosticReport>('/api/v1/diagnostics',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   agents:()=>request<AgentOverview>('/api/v1/agents'),
+  agentControlTrust:()=>request<AgentControlTrust>('/api/v1/agents/control-trust'),
   inviteAgent:(name:string,location:string)=>request<AgentInvite>('/api/v1/agents/invite',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,location})}),
   rotateAgent:(id:string)=>request<AgentInvite>('/api/v1/agents/'+encodeURIComponent(id)+'/rotate',{method:'POST'}),
   revokeAgent:(id:string)=>request<{revoked:boolean}>('/api/v1/agents/'+encodeURIComponent(id)+'/revoke',{method:'POST'}),

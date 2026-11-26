@@ -18,6 +18,10 @@ class Enroll(BaseModel):
     token: str=Field(min_length=40,max_length=128)
     csr: str|None=Field(default=None,max_length=4096)
 
+class ControlRenewal(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    csr:str=Field(min_length=1,max_length=4096)
+
 class Heartbeat(BaseModel):
     version: Literal["1"]="1"
     engine: Literal["python-dns02"]="python-dns02"

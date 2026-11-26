@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from cryptography import x509
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
-from .agent_control_pki import peer_fingerprint
+from .agent_control_pki import peer_fingerprint,peer_public_key,public_bytes
 
 class AgentTLSProtocol(H11Protocol):
     def connection_made(self,transport):
@@ -21,7 +21,9 @@ class AgentTLSProtocol(H11Protocol):
             return
         der=tls.getpeercert(binary_form=True)
         fingerprint=hashlib.sha256(der).hexdigest() if der else None
-        expires=x509.load_der_x509_certificate(der).not_valid_after_utc if der else None
+        cert=x509.load_der_x509_certificate(der) if der else None
+        expires=cert.not_valid_after_utc if cert else None
+        key=public_bytes(cert.public_key()) if cert else None
         original=self.app
         async def trusted_scope(scope,receive,send):
             scope=dict(scope)
@@ -29,8 +31,11 @@ class AgentTLSProtocol(H11Protocol):
             current=fingerprint if expires is not None and dt.datetime.now(dt.timezone.utc)<expires else None
             scope["ndc_agent_peer"]=current
             token=peer_fingerprint.set(current)
+            kt=peer_public_key.set(key if current else None)
             try:await original(scope,receive,send)
-            finally:peer_fingerprint.reset(token)
+            finally:
+                peer_public_key.reset(kt)
+                peer_fingerprint.reset(token)
         self.app=trusted_scope
 
 @asynccontextmanager

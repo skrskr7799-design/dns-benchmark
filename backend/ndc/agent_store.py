@@ -13,7 +13,7 @@ from .agent_evidence import records,encode
 from .remote_contract import CONFIG,config_key,validate_remote,project_remote
 from .evidence import canonical
 from .distributed import DISPATCH_WINDOW,compare as compare_remote_batch
-from .agent_control_pki import peer_fingerprint
+from .agent_control_pki import peer_fingerprint,peer_public_key
 
 class AgentError(Exception):
     def __init__(self,status,message):
@@ -56,7 +56,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3,4,5,6,7):
+            if version not in (0,1,2,3,4,5,6,7,8):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -130,6 +130,11 @@ class AgentStore(PeerCoordination,GoodputCoordination):
                     ALTER TABLE agents ADD COLUMN control_fingerprint TEXT;
                     ALTER TABLE agents ADD COLUMN control_expires REAL;
                     PRAGMA user_version=7;COMMIT;""")
+            if version<8:
+                c.executescript("""BEGIN IMMEDIATE;
+                    CREATE TABLE agent_control_renewal(agent_id TEXT PRIMARY KEY REFERENCES agents(id),
+                        fingerprint TEXT NOT NULL,expires REAL NOT NULL,certificate TEXT NOT NULL);
+                    PRAGMA user_version=8;COMMIT;""")
 
     def capability_list(self):
         with self.db() as c:
@@ -214,9 +219,44 @@ class AgentStore(PeerCoordination,GoodputCoordination):
         if not r:
             raise AgentError(401,"Invalid agent credential")
         pin=peer_fingerprint.get()
-        if r["control_fingerprint"]!=pin or (pin is not None and (r["control_expires"] is None or self.clock()>=r["control_expires"])):
-            raise AgentError(401,"Invalid agent certificate binding")
-        return r["id"]
+        if r["control_fingerprint"] is None:
+            if pin is None:return r["id"]
+        elif pin is not None:
+            now=self.clock()
+            if r["control_fingerprint"]==pin and now<r["control_expires"]:return r["id"]
+            pending=c.execute("SELECT fingerprint,expires FROM agent_control_renewal WHERE agent_id=?",(r["id"],)).fetchone()
+            if pending and pending["fingerprint"]==pin and now<pending["expires"]:return r["id"]
+        raise AgentError(401,"Invalid agent certificate binding")
+
+    def renew_control(self,credential,csr,authority):
+        pin=peer_fingerprint.get();key=peer_public_key.get()
+        if pin is None or key is None:raise AgentError(401,"Client certificate required")
+        # Verify same-key proof even when returning an already issued leaf.
+        from cryptography import x509
+        from .agent_control_pki import public_bytes
+        parsed=x509.load_pem_x509_csr(csr.encode("ascii"))
+        if not parsed.is_signature_valid or public_bytes(parsed.public_key())!=key:
+            raise AgentError(422,"Renewal key mismatch")
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            id=self.identity(c,credential)
+            row=c.execute("SELECT control_fingerprint,control_expires FROM agents WHERE id=?",(id,)).fetchone()
+            pending=c.execute("SELECT * FROM agent_control_renewal WHERE agent_id=?",(id,)).fetchone()
+            now=self.clock()
+            if pending and pin==row["control_fingerprint"]:
+                return {"certificate":pending["certificate"],"certificate_expires":pending["expires"]}
+            expiry=pending["expires"] if pending and pin==pending["fingerprint"] else row["control_expires"]
+            if expiry-now>14*86400:raise AgentError(409,"Renewal not due")
+            if pending:
+                # Previous leaf has already expired before a 90-day leaf
+                # becomes due again. Never accumulate additional bindings.
+                if now<row["control_expires"]:raise AgentError(409,"Prior certificate still valid")
+                c.execute("UPDATE agents SET control_fingerprint=?,control_expires=? WHERE id=?",(pending["fingerprint"],pending["expires"],id))
+            cert,fp,expires=authority.sign_client(id,csr,expected_key=key)
+            c.execute("""INSERT INTO agent_control_renewal(agent_id,fingerprint,expires,certificate) VALUES(?,?,?,?)
+                ON CONFLICT(agent_id) DO UPDATE SET fingerprint=excluded.fingerprint,expires=excluded.expires,certificate=excluded.certificate""",(id,fp,expires,cert))
+            self.audit(c,id,"control certificate renewed")
+            return {"certificate":cert,"certificate_expires":expires}
 
     def expire(self,c):
         now=self.clock()
@@ -239,7 +279,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
     def list(self):
         with self.db() as c:
             return [dict(r)|{"online":not r["revoked"] and r["last_seen"] is not None and self.clock()-r["last_seen"]<45}
-                    for r in c.execute("SELECT id,name,location,revoked,last_seen,engine,enroll_until,control_fingerprint IS NOT NULL AS mtls,control_expires,credential IS NOT NULL AS enrolled FROM agents ORDER BY name,id")]
+                    for r in c.execute("SELECT id,name,location,revoked,last_seen,engine,enroll_until,control_fingerprint IS NOT NULL AS mtls,COALESCE((SELECT expires FROM agent_control_renewal WHERE agent_id=agents.id),control_expires) AS control_expires,credential IS NOT NULL AS enrolled FROM agents ORDER BY name,id")]
 
     def revoke(self,id):
         with self.db() as c:
@@ -249,6 +289,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
             self.peer_invalidate(c,id)
+            c.execute("DELETE FROM agent_control_renewal WHERE agent_id=?",(id,))
             self.audit(c,id,"revoked")
 
     def rotate(self,id):
@@ -260,6 +301,7 @@ class AgentStore(PeerCoordination,GoodputCoordination):
             c.execute("UPDATE tasks SET state='cancelled',finished=? WHERE agent_id=? AND state IN ('queued','leased')",(self.clock(),id))
             c.execute("DELETE FROM agent_capabilities WHERE agent_id=?",(id,))
             self.peer_invalidate(c,id)
+            c.execute("DELETE FROM agent_control_renewal WHERE agent_id=?",(id,))
             self.audit(c,id,"rotated")
         return {"id":id,"token":token,"expires_at":self.clock()+600}
 
