@@ -5,6 +5,7 @@ import os
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
@@ -267,9 +268,9 @@ class Agent:
         atomic(self.spool,{"state":"ready","version":"2","id":task["id"],"body":body})
         self.flush()
 
-    def run(self):
-        with open(self.root/"agent.lock","a") as lock:
-            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    def run(self,*,lock_held=False):
+        with (nullcontext(None) if lock_held else open(self.root/"agent.lock","a")) as lock:
+            if lock is not None:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             self.enroll()
             print('Agent identity ready; protocol '+('2' if self.protocol_v2 else '1')+'; waiting for controller heartbeat',flush=True)
             peer_file=self.root/"peer-directions.json"
@@ -308,6 +309,16 @@ class Agent:
 
 def main():
     root=Path(os.getenv("NDC_AGENT_DATA","/data"))
+    from .agent_bootstrap import BOOTSTRAP,exists,load,prepare
+    if exists(BOOTSTRAP):
+        with open(root/"agent.lock","a") as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            obj=load()
+            prepare(root,obj)
+            start(root,lock_held=True)
+    else:start(root)
+
+def start(root,*,lock_held=False):
     allowed=json.loads((root/"allowed-endpoints.json").read_text())
     if not isinstance(allowed,list) or not 1<=len(allowed)<=100 or any(not isinstance(x,str) for x in allowed):
         raise ValueError("Provide 1–100 explicitly approved resolver endpoints")
@@ -316,7 +327,7 @@ def main():
     mode=os.getenv("NDC_AGENT_PROTOCOL","1")
     if mode not in ("1","2"):raise ValueError("Unsupported agent protocol")
     approvals=load_approvals(root/"allowed-probes.json") if mode=="2" else ()
-    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2",approvals=approvals).run()
+    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2",approvals=approvals).run(lock_held=lock_held)
 
 if __name__=="__main__":
     main()
