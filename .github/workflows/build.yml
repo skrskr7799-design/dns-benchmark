@@ -83,6 +83,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_agent_v2.py
       - name: Typed remote TCP contract, admission and result lifecycle
         run: docker exec -i benchmark python - < tests/test_remote_tasks.py
+      - name: Remote TCP worker scope, real socket, hard deadline and restart
+        run: docker exec -i benchmark python - < tests/test_remote_worker.py
       - name: Multi-agent batch lifecycle
         run: docker exec -i benchmark python - < tests/test_batches.py
       - name: Diagnostic evidence rules

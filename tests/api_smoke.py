@@ -295,7 +295,7 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
             assert detail["payload"]["results"][0]["ok"]==1
             assert not agent.spool.exists()
             caps=request("/api/v1/agents/capabilities")
-            assert caps["dispatchable"]==["dns"]
+            assert caps["dispatchable"]==["dns","tcp"]
             claimed=next(a for a in caps["agents"] if a["id"]==invite["id"])
             assert claimed["fresh"] and claimed["dispatchable"]==["dns"] and claimed["version"]=="2"
             assert request("/api/v1/agents")["agents"][0]["online"]
@@ -310,6 +310,43 @@ with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TES
         finally:
             agent.client.close()
 print("Outbound agent and real DNS smoke passed")
+
+# Real v2 TCP lease, local approval, actual connection and stored evidence.
+from backend.ndc.remote_contract import RemoteTCP
+from backend.ndc.remote_worker import Approval
+with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1","NDC_ALLOWED_CIDRS":"127.0.0.1/32"}),socket.socket() as listener:
+    listener.bind(("127.0.0.1",0));listener.listen(2);listener.settimeout(3)
+    cfg=RemoteTCP(host="127.0.0.1",port=listener.getsockname()[1])
+    invitation=request("/api/v1/agents/invite",{"name":"TCP fixture","location":"loopback"})
+    root=Path(tmp);(root/"enrollment-token").write_text(invitation["token"])
+    agent=Agent(root,base,["udp://127.0.0.1"],protocol_v2=True,approvals=(Approval(config=cfg,cidrs=["127.0.0.1/32"]),))
+    try:
+        agent.enroll();agent.step()
+        path="/api/v1/agents/"+invitation["id"]+"/remote-tasks"
+        body={"request_id":"d"*32,"config":cfg.model_dump(mode="json")}
+        task=request(path,body)["id"]
+        assert request(path,body)["duplicate"]
+        agent.step()
+        conn,_=listener.accept();conn.close()
+        detail=request("/api/v1/agents/remote-tasks/"+task)
+        assert detail["state"]=="completed",detail
+        obs=detail["payload"]["observation"]
+        assert obs["outcome"]=="success" and obs["peer_ip"]=="127.0.0.1",obs
+        assert not agent.spool.exists()
+        denied=request(path,{"request_id":"e"*32,"config":cfg.model_dump(mode="json")|{"port":1 if cfg.port!=1 else 2}})["id"]
+        agent.step()
+        detail=request("/api/v1/agents/remote-tasks/"+denied)
+        assert detail["state"]=="failed" and detail["payload"]["execution_error"]=="local_policy_denied",detail
+        for _ in range(50):
+            evidence=request("/api/v1/intelligence/observations?source=agent&limit=200")
+            tcp={x["record"]["source_id"]:x["record"] for x in evidence["items"] if x["record"]["probe_kind"]=="tcp"}
+            if task in tcp and denied in tcp:break
+            time.sleep(.2)
+        assert tcp[task]["outcome"]=="success" and tcp[denied]["outcome"]=="unknown"
+        assert tcp[task]["provenance"]=="agent_claim"
+        request("/api/v1/agents/"+invitation["id"]+"/revoke",{})
+    finally:agent.client.close()
+print("Real remote TCP agent, local denial and evidence drain passed")
 
 # Same profile on two independent agent identities, including an offline interval.
 with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ,{"NDC_AGENT_TEST_HTTP":"1"}):

@@ -24,9 +24,8 @@ def secret():
     return secrets.token_urlsafe(32)
 
 class AgentStore:
-    # Closed until the corresponding agent execution path is implemented and tested.
-    # Not an environment switch or remotely configurable capability.
-    remote_kinds=()
+    # Only implemented types; each agent must explicitly claim local support.
+    remote_kinds=("tcp",)
 
     def supported_kinds(self):
         return (*DISPATCHABLE_V2,*self.remote_kinds)

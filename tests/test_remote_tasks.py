@@ -11,6 +11,7 @@ class Tests(unittest.TestCase):
     def setUp(self):
         t=tempfile.TemporaryDirectory();self.addCleanup(t.cleanup)
         self.now=100000.;self.s=AgentStore(Path(t.name)/"agents.sqlite",lambda:self.now);self.s.initialize()
+        self.s.remote_kinds=() # isolate pre-executor negotiation tests
         self.a=self.s.enroll(self.s.invite("one","site")["token"])
         self.b=self.s.enroll(self.s.invite("two","site")["token"])
         self.cfg=RemoteTCP(host="127.0.0.1",port=443)

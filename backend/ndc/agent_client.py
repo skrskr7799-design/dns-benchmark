@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 import httpx
 from .agent_contract import AgentRun, ENGINE, VERSION, PROTOCOL_V2, ENGINE_V2
 from .probes.dns import measure, measure_both
+from .remote_contract import RemoteTCP,RemoteResult,config_key
+from .remote_worker import load_approvals,run_tcp
 
 def atomic(path,value):
     temp=path.with_suffix(".tmp")
@@ -51,7 +53,7 @@ def execute(task,allowed,cancel=None):
     return rows
 
 class Agent:
-    def __init__(self,root,url,allowed,*,protocol_v2=False):
+    def __init__(self,root,url,allowed,*,protocol_v2=False,approvals=()):
         self.root=Path(root);self.url=controller_url(url);self.allowed=frozenset(allowed)
         self.root.mkdir(mode=0o700,parents=True,exist_ok=True)
         self.identity=self.root/"identity.json"
@@ -60,6 +62,7 @@ class Agent:
                                  verify=os.getenv("NDC_AGENT_CA_FILE") or True)
         self.credential=None
         self.protocol_v2=protocol_v2
+        self.approvals=tuple(approvals)
 
     def post(self,path,body,auth=True):
         headers={"Authorization":"Bearer "+self.credential} if auth else {}
@@ -85,11 +88,19 @@ class Agent:
         if not self.spool.exists():
             return True
         value=json.loads(self.spool.read_text())
-        if value["state"]=="executing":
-            # Crash during measurement: never rerun the lease.
-            value={"state":"ready","id":value["id"],"body":{"lease":value["lease"],"status":"failed","results":[],"error":"Agent restarted during measurement"}}
-            atomic(self.spool,value)
-        r=self.post("results/"+value["id"],value["body"])
+        if value.get("version")=="2":
+            if value["state"]=="executing":
+                value={"state":"ready","version":"2","id":value["id"],
+                    "body":value["result_base"]|{"status":"failed","execution_error":"interrupted"}}
+                atomic(self.spool,value)
+            path="v2/results/"+value["id"]
+        else:
+            if value["state"]=="executing":
+                # Crash during measurement: never rerun the lease.
+                value={"state":"ready","id":value["id"],"body":{"lease":value["lease"],"status":"failed","results":[],"error":"Agent restarted during measurement"}}
+                atomic(self.spool,value)
+            path="results/"+value["id"]
+        r=self.post(path,value["body"])
         if r.status_code in (200,404,409,422):
             if r.status_code!=200:
                 print("Result rejected or expired: "+str(r.status_code),flush=True)
@@ -102,7 +113,8 @@ class Agent:
         if not self.flush():
             return
         if self.protocol_v2:
-            r=self.post("v2/poll",{"version":PROTOCOL_V2,"engine":ENGINE_V2,"capabilities":["dns"]})
+            capabilities=["dns"]+(["tcp"] if self.approvals else [])
+            r=self.post("v2/poll",{"version":PROTOCOL_V2,"engine":ENGINE_V2,"capabilities":capabilities})
         else:
             r=self.post("poll",{"version":VERSION,"engine":ENGINE})
         r.raise_for_status()
@@ -115,6 +127,10 @@ class Agent:
         import re
         if not re.fullmatch(r"[a-f0-9]{32}",task["id"]):
             raise ValueError("Invalid task ID")
+        if task.get("version")=="2":
+            if not self.protocol_v2:raise ValueError("Unexpected v2 lease")
+            self.remote_step(task)
+            return
         atomic(self.spool,{"state":"executing","id":task["id"],"lease":task["lease"]})
         cancel=threading.Event()
         timer=threading.Timer(min(240,task["lease_seconds"]-15),cancel.set)
@@ -141,6 +157,44 @@ class Agent:
             done.set()
             worker.join(11)
         atomic(self.spool,{"state":"ready","id":task["id"],"body":body})
+        self.flush()
+
+    def remote_step(self,task):
+        if task.get("engine")!=ENGINE_V2 or task.get("kind")!="tcp" or task.get("lease_seconds")!=300:
+            raise ValueError("Unsupported remote lease")
+        cfg=RemoteTCP.model_validate(task["config"])
+        if config_key(cfg)!=task.get("config_key"):raise ValueError("Remote configuration mismatch")
+        result_base={"version":"2","engine":ENGINE_V2,"kind":"tcp","lease":task["lease"],"config_key":task["config_key"]}
+        RemoteResult.model_validate(result_base|{"status":"failed","execution_error":"interrupted"})
+        atomic(self.spool,{"state":"executing","version":"2","id":task["id"],"result_base":result_base})
+        cancel=threading.Event();done=threading.Event()
+        def active():
+            try:
+                response=self.post("v2/heartbeat",{"version":"2","engine":ENGINE_V2,"task_id":task["id"],"lease":task["lease"]})
+                return response.status_code==200 and response.json().get("active") is True
+            except Exception:
+                return False
+        def heartbeat():
+            while not done.wait(2):
+                if not active():
+                    cancel.set()
+                    return
+        worker=None
+        try:
+            if not active():
+                observation,error=None,"cancelled"
+            else:
+                worker=threading.Thread(target=heartbeat,daemon=True);worker.start()
+                observation,error=run_tcp(cfg,self.approvals,cancel)
+        except Exception:
+            observation,error=None,"internal_error"
+        finally:
+            done.set()
+            if worker is not None:worker.join(11)
+        if cancel.is_set():observation,error=None,"cancelled"
+        body=result_base|({"status":"completed","observation":observation.model_dump(mode="json")} if observation is not None else {"status":"failed","execution_error":error or "internal_error"})
+        body=RemoteResult.model_validate(body).model_dump(mode="json")
+        atomic(self.spool,{"state":"ready","version":"2","id":task["id"],"body":body})
         self.flush()
 
     def run(self):
@@ -171,7 +225,8 @@ def main():
         AgentRun(endpoints=[endpoint])
     mode=os.getenv("NDC_AGENT_PROTOCOL","1")
     if mode not in ("1","2"):raise ValueError("Unsupported agent protocol")
-    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2").run()
+    approvals=load_approvals(root/"allowed-probes.json") if mode=="2" else ()
+    Agent(root,os.environ["NDC_CONTROLLER_URL"],allowed,protocol_v2=mode=="2",approvals=approvals).run()
 
 if __name__=="__main__":
     main()

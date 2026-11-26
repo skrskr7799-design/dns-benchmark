@@ -106,6 +106,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-04C2 | CI failed (45753346652) | complete backup fixture, real TLS acceptance and maintenance browser regression |
 | NIP-04C3 | implemented / CI passed (45753872223) | shared test CA and two distinct server leaves, strict validation unchanged |
 | NIP-05A1a | implemented / CI passed (45754380166) | [v2 capability negotiation and legacy DNS lease compatibility](NIP-05.md) |
-| NIP-05A1b | implemented candidate / CI pending | typed TCP admission, shared lease, validated result and outbox; dispatch disabled |
-| NIP-05A2..C | planned | local execution, distributed analysis, peer measurements and UI |
+| NIP-05A1b | implemented / CI passed (45754782749) | typed TCP admission, shared lease, validated result and outbox; dispatch disabled |
+| NIP-05A2a | implemented candidate / CI pending | scoped remote TCP subprocess, deadline, cancellation, v2 spool and real API acceptance |
+| NIP-05A2b..C | planned | TLS/HTTP/routes, distributed analysis, peer measurements and UI |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |

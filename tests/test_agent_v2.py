@@ -15,6 +15,7 @@ class Tests(unittest.TestCase):
         tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
         self.root=Path(tmp.name);self.now=100000.
         self.s=AgentStore(self.root/"agents.sqlite",lambda:self.now);self.s.initialize()
+        self.s.remote_kinds=() # isolate pre-executor negotiation tests
         self.a=self.s.enroll(self.s.invite("one","site")["token"])
         self.b=self.s.enroll(self.s.invite("two","site")["token"])
         self.cfg=AgentRun(endpoints=["udp://127.0.0.1"],count=1)
