@@ -217,6 +217,7 @@ class Agent:
         with open(self.root/"agent.lock","a") as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             self.enroll()
+            print('Agent identity ready; protocol '+('2' if self.protocol_v2 else '1')+'; waiting for controller heartbeat',flush=True)
             peer_file=self.root/"peer-directions.json"
             if peer_file.exists() or peer_file.is_symlink():
                 if not self.protocol_v2:raise ValueError("Peer runtime requires protocol 2")

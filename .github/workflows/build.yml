@@ -44,6 +44,15 @@ jobs:
         run: |
           NDC_PREVIEW_IMAGE=ndc-acceptance:ci docker compose -f deploy/compose.acceptance.yaml config --quiet
           NDC_PREVIEW_IMAGE=ndc-acceptance:ci docker compose -f deploy/compose.acceptance.yaml config --format json | jq -e '.services.benchmark | .read_only == true and .ports[0].host_ip == "127.0.0.1" and .ports[0].published == "8113" and .environment.NDC_ATLAS_ENABLED == "0" and .environment.NDC_PEER_ENABLED == "0" and .environment.NDC_GOODPUT_ENABLED == "0"'
+      - name: Validate agent deployment and wizard template
+        run: |
+          NDC_CONTROLLER_URL=https://ndc.example.net docker compose -f deploy/compose.agent.yaml config --format json | jq -e '.services.agent | .image == "ghcr.io/skrskr7799-design/dns-benchmark:edge" and .environment.NDC_AGENT_PROTOCOL == "2" and .read_only == true and .healthcheck.disable == true and ((.ports // []) | length == 0)'
+          python - <<'PY'
+          import json,pathlib
+          compose=pathlib.Path("deploy/compose.agent.yaml").read_text()
+          line=next(s for s in pathlib.Path("web/src/features/agent-setup.tsx").read_text().splitlines() if s.startswith("export const AGENT_COMPOSE="))
+          assert json.loads(line.split("=",1)[1])==compose
+          PY
       - run: docker build -t dns-benchmark:test .
       - name: Python dependency audit
         run: |

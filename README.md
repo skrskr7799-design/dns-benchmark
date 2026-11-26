@@ -54,3 +54,6 @@ limitations. Local CI is necessary but not sufficient for production
 acceptance. No live deployment or main merge is implied.
 
 First-run setup also accepts direct `.local` hostnames (e.g. `http://casaos.local:8099`) from private source addresses. The suffix does not authenticate the client; forwarded requests remain rejected. Name resolution must already work in the user's network. Password minimum remains 16 characters; the form displays validation checks and a message on invalid submission.
+
+## Connect VPS agents
+See [agent deployment](docs/AGENT-DEPLOYMENT.md). Agents page includes downloadable Compose, origin configuration and local DNS allowlist. Protocol 2 is the current Compose default; existing agents retain their identity and spool. Verified private HTTPS required.

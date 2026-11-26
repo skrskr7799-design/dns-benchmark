@@ -59,3 +59,6 @@ CI includes lifecycle, isolation, expiry, spool and real loopback API/agent
 tests. Final CI pending. DIST-02 adds UI, two-node comparison and offline
 scenario acceptance. Existing lockfile/audit, independent measurement and
 production security/CasaOS acceptance remain open.
+
+## Current installation (supersedes historical preview)
+See [AGENT-DEPLOYMENT.md](AGENT-DEPLOYMENT.md) and the Agents wizard. Current Compose uses edge / protocol 2, with explicit overrides for legacy compatibility or pinned images. Controller HTTP healthcheck is disabled for agent containers. Online heartbeat is the operational indicator. Historical preview tags above are not current deployment instructions.

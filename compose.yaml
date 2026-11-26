@@ -6,6 +6,13 @@ services:
       - "8099:8080"
     volumes:
       - /DATA/AppData/dns-benchmark:/data
+    environment:
+      NDC_ALLOWED_CIDRS: "${NDC_ALLOWED_CIDRS:-}"
+      NDC_ATLAS_ENABLED: "${NDC_ATLAS_ENABLED:-0}"
+      NDC_LAB_ENDPOINTS: "${NDC_LAB_ENDPOINTS:-[]}"
+      NDC_PEER_ENABLED: "${NDC_PEER_ENABLED:-0}"
+      NDC_GOODPUT_ENABLED: "${NDC_GOODPUT_ENABLED:-0}"
+      NDC_ORIGIN: "${NDC_ORIGIN:-}"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

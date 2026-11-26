@@ -1,15 +1,21 @@
 name: ndc-agent
 services:
   agent:
-    image: ghcr.io/skrskr7799-design/dns-benchmark:preview-dist-02
+    image: "${NDC_AGENT_IMAGE:-ghcr.io/skrskr7799-design/dns-benchmark:edge}"
     command: ["python","-m","backend.ndc.agent_client"]
     environment:
       NDC_CONTROLLER_URL: "${NDC_CONTROLLER_URL:?Set verified HTTPS controller origin}"
-      NDC_AGENT_PROTOCOL: "${NDC_AGENT_PROTOCOL:-1}"
+      NDC_AGENT_PROTOCOL: "${NDC_AGENT_PROTOCOL:-2}"
       NDC_AGENT_CA_FILE: "${NDC_AGENT_CA_FILE:-}"
+      NDC_CA_FILE: "${NDC_CA_FILE:-}"
       NDC_ALLOWED_CIDRS: "${NDC_ALLOWED_CIDRS:-}"
     volumes:
       - ./agent-data:/data
+    healthcheck:
+      disable: true
+    pids_limit: 64
+    mem_limit: 384m
+    stop_grace_period: 20s
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -17,4 +23,4 @@ services:
       - ALL
     read_only: true
     tmpfs:
-      - /tmp
+      - /tmp:size=32m
