@@ -20,6 +20,7 @@ from backend.ndc.security import Security, guard, router as auth_router
 from backend.ndc.scope import allowed_networks
 from backend.ndc.agent_store import AgentStore
 from backend.ndc.agent_api import router as agent_router
+from backend.ndc.peer_api import router as peer_router
 from backend.ndc.integration_api import router as integration_router
 
 @asynccontextmanager
@@ -73,6 +74,7 @@ app.include_router(auth_router)
 app.include_router(router)
 app.include_router(monitor_router)
 app.include_router(agent_router)
+app.include_router(peer_router)
 app.include_router(integration_router)
 web_dist=Path(__file__).with_name("web-dist")
 if (web_dist/"assets").is_dir():

@@ -236,7 +236,7 @@ async def guard(request,call_next):
         response.headers["Referrer-Policy"]="no-referrer"
         return response
     security=request.app.state.security
-    machine=bool(re.fullmatch(r"/api/v1/agents/machine/(?:enroll|poll|heartbeat|v2/(?:poll|heartbeat|results/[a-f0-9]{32})|results/[a-f0-9]{32})",path)) and request.method=="POST"
+    machine=bool(re.fullmatch(r"/api/v1/agents/machine/(?:enroll|poll|heartbeat|v2/(?:poll|heartbeat|results/[a-f0-9]{32})|results/[a-f0-9]{32}|peer/(?:claims|offer|prepare|ready|start|status|finish))",path)) and request.method=="POST"
     if machine:
         if security.setup_required:
             return JSONResponse({"detail":"Initial setup required"},403)

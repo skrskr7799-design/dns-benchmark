@@ -36,6 +36,8 @@ class AgentStore(PeerCoordination):
     def __init__(self,path,clock=time.time):
         self.path=path;self.clock=clock
         self.max_evidence_pending=10000
+        # Volatile grant relay; all accesses in serialized write transactions.
+        self.peer_handoffs={}
 
     @contextmanager
     def db(self):

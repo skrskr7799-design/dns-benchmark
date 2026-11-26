@@ -1,4 +1,4 @@
-"""Durable internal directional coordination. No machine/owner routes or token delivery.
+"""Durable directional coordination and volatile grant relay.
 The controller records claims, not proof of local policy or transport execution.
 """
 import hashlib
@@ -42,7 +42,7 @@ def direction_key(d):
     return digest(d.model_dump(mode="json"))
 
 class PeerCoordination:
-    # Internal test gate only. No environment option, API or agent integration.
+    # Test gate only. No deployment switch or automatic agent integration.
     peer_enabled=False
 
     def peer_reserved(self,c,id):
@@ -54,8 +54,13 @@ class PeerCoordination:
             WHERE finished IS NULL AND (deadline<=? OR created>?)""",(now,now,now))
         c.execute("DELETE FROM peer_requests WHERE finished IS NOT NULL AND finished<?",(now-RETENTION,))
         c.execute("DELETE FROM peer_claims WHERE reported_at<=? OR reported_at>?",(now-CLAIM_TTL,now))
+        for id in tuple(self.peer_handoffs):
+            if not c.execute("SELECT 1 FROM peer_requests WHERE id=? AND state='ready' AND deadline>?",(id,now)).fetchone():
+                self.peer_handoffs.pop(id,None)
 
     def peer_invalidate(self,c,id):
+        for r in c.execute("SELECT id FROM peer_requests WHERE finished IS NULL AND (source_id=? OR destination_id=?)",(id,id)):
+            self.peer_handoffs.pop(r[0],None)
         c.execute("DELETE FROM peer_claims WHERE agent_id=?",(id,))
         c.execute("""UPDATE peer_requests SET state='cancelled',outcome='unknown',finished=?
             WHERE finished IS NULL AND (source_id=? OR destination_id=?)""",(self.clock(),id,id))
@@ -79,6 +84,7 @@ class PeerCoordination:
             for r in c.execute("SELECT id,plan FROM peer_requests WHERE finished IS NULL AND (source_id=? OR destination_id=?)",(id,id)).fetchall():
                 if direction_key(RTTPlan.model_validate_json(r["plan"]).direction) not in keys:
                     c.execute("UPDATE peer_requests SET state='cancelled',outcome='unknown',finished=? WHERE id=?",(self.clock(),r["id"]))
+                    self.peer_handoffs.pop(r["id"],None)
             c.execute("DELETE FROM peer_claims WHERE agent_id=?",(id,))
             c.executemany("INSERT INTO peer_claims VALUES(?,?,?)",[(id,k,self.clock()) for k in keys])
 
@@ -134,8 +140,10 @@ class PeerCoordination:
             c.execute("UPDATE peer_requests SET state='preparing',receiver_lease=?,deadline=? WHERE id=?",(hash_lease(lease),until,id))
             return {"plan":plan.model_dump(mode="json"),"lease":lease,"deadline":until}
 
-    def peer_ready(self,credential,id,lease):
+    def peer_ready(self,credential,id,lease,grant=None):
         self.peer_gate()
+        if grant is not None and (not isinstance(grant,str) or len(grant)!=43 or any(ch not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for ch in grant)):
+            raise ValueError("Invalid grant")
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential);self.expire(c)
             r=self.peer_row(c,id)
@@ -143,19 +151,48 @@ class PeerCoordination:
             self.peer_active(c,r,"preparing")
             until=min(r["deadline"],self.clock()+READY_SECONDS)
             c.execute("UPDATE peer_requests SET state='ready',deadline=? WHERE id=?",(until,id))
+            if grant is not None:self.peer_handoffs[id]=grant
             return {"deadline":until}
 
-    def peer_start(self,credential,id):
+    def peer_start(self,credential,id,require_grant=False):
         self.peer_gate()
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential);self.expire(c)
             r=self.peer_row(c,id)
             if r["source_id"]!=agent:raise PeerConflict("Wrong source")
             plan=self.peer_active(c,r,"ready")
+            grant=self.peer_handoffs.pop(id,None)
+            if require_grant and grant is None:
+                c.execute("UPDATE peer_requests SET state='interrupted',outcome='unknown',finished=? WHERE id=?",(self.clock(),id))
+                return {"state":"interrupted"}
             lease=secrets.token_urlsafe(32)
             # A lost response is ambiguous; never reissue a source lease.
             c.execute("UPDATE peer_requests SET state='running',source_lease=? WHERE id=?",(hash_lease(lease),id))
-            return {"plan":plan.model_dump(mode="json"),"lease":lease,"deadline":r["deadline"]}
+            reply={"plan":plan.model_dump(mode="json"),"lease":lease,"deadline":r["deadline"]}
+            if require_grant:reply["grant"]=grant
+            return reply
+
+    def peer_offer(self,credential):
+        self.peer_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential);self.expire(c)
+            r=c.execute("""SELECT * FROM peer_requests WHERE finished IS NULL AND
+                ((destination_id=? AND state='queued') OR (source_id=? AND state='ready'))""",(agent,agent)).fetchone()
+            if not r:return {"offer":None}
+            plan=RTTPlan.model_validate_json(r["plan"])
+            if not self.peer_fresh(c,plan.direction):return {"offer":None}
+            return {"offer":{"id":r["id"],"role":"receiver" if r["destination_id"]==agent else "source"}}
+
+    def peer_status(self,credential,id,lease):
+        self.peer_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");agent=self.identity(c,credential);self.expire(c)
+            r=self.peer_row(c,id)
+            key="receiver_lease" if r["destination_id"]==agent else "source_lease" if r["source_id"]==agent else None
+            if key is None or r[key]!=hash_lease(lease):raise PeerConflict("Wrong status lease")
+            p=RTTPlan.model_validate_json(r["plan"])
+            active=r["finished"] is None and r["created"]<=self.clock()<r["deadline"] and self.peer_fresh(c,p.direction)
+            return {"active":active,"state":r["state"]}
 
     def peer_finish(self,credential,id,lease,*,report=None,echoes=None):
         self.peer_gate()
@@ -216,9 +253,16 @@ class PeerCoordination:
             r["source_report"]=json.loads(r["source_report"]) if r["source_report"] else None
             return r
 
+    def peer_list(self):
+        self.peer_gate()
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE");self.expire(c)
+            return [dict(r) for r in c.execute("SELECT id,source_id,destination_id,state,created,deadline,finished,outcome FROM peer_requests ORDER BY created DESC,id DESC LIMIT 200")]
+
     def peer_cancel(self,id):
         with self.db() as c:
             c.execute("BEGIN IMMEDIATE");self.expire(c);r=self.peer_row(c,id)
             if r["finished"] is not None:return False
+            self.peer_handoffs.pop(id,None)
             c.execute("UPDATE peer_requests SET state='cancelled',outcome='unknown',finished=? WHERE id=?",(self.clock(),id))
             return True

@@ -115,6 +115,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05A3c/A4a | targeted tests passed / full CI failed (45757284651) | strict fixture repair, peer authorization and RTT report contract only |
 | NIP-05A4b1 | bidirectional mTLS passed / CI failed (45757582898) | explicit one-shot mTLS RTT transport and local real tests |
 | NIP-05A4b1r | implemented / CI passed (45759770696) | deterministic login budget and successive listener bind, exclusivity regression |
-| NIP-05A4b2a | implemented candidate / CI pending | internal durable peer coordination, shared reservation and evidence reconciliation |
-| NIP-05A4b2b..C | planned | runtime peer coordination, throughput, UI and acceptance |
+| NIP-05A4b2a | implemented / CI passed (45760382194) | internal durable peer coordination, shared reservation and evidence reconciliation |
+| NIP-05A4b2b1 | implemented candidate / CI pending | gated peer API and one-shot volatile grant relay |
+| NIP-05A4b2b2..C | planned | local agent runtime, throughput, UI and acceptance |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
