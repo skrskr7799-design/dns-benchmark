@@ -15,7 +15,7 @@ from .protocol_lab import LabProfile,capability as lab_capability,run as lab_run
 from .internet_atlas import AtlasRequest,run as atlas_run,enabled as atlas_enabled
 from .web_xray import XRayRequest,run as xray_run
 from .network_twin import Save as TwinSave,report as twin_report
-from .scenario import Save as ScenarioSave,Run as ScenarioRun
+from .scenario import Save as ScenarioSave,Run as ScenarioRun,Schedule as ScenarioSchedule
 from .chaos_lab import Experiment,run as chaos_run
 from .experiment_history import optionally_save
 import time
@@ -116,6 +116,22 @@ def scenario_save(request:Request,body:ScenarioSave):
     try:return state.scenarios.save(body,state.twin,{m["id"] for m in state.monitors.list()})
     except (Conflict,Capacity) as exc:raise HTTPException(409,str(exc)) from None
     except ValueError:raise HTTPException(422,"Invalid scenario or binding") from None
+
+@router.get("/scenario/schedule")
+def scenario_schedule(request:Request):
+    return request.app.state.scenarios.schedule()
+
+@router.put("/scenario/schedule")
+def scenario_schedule_configure(request:Request,body:ScenarioSchedule):
+    state=request.app.state
+    try:return state.scenarios.configure_schedule(body,{m["id"] for m in state.monitors.list()})
+    except Conflict as exc:raise HTTPException(409,str(exc)) from None
+    except ValueError:raise HTTPException(422,"Invalid schedule or monitor") from None
+
+@router.delete("/scenario/runs/{id}")
+def scenario_run_delete(request:Request,id:str):
+    if not request.app.state.scenarios.delete_run(id):raise HTTPException(404,"Scenario run not found")
+    return {"deleted":True}
 
 @router.get("/scenario/runs")
 def scenario_runs(request:Request):

@@ -51,7 +51,8 @@ async def lifespan(app):
         schedules=Schedules(evidence,monitors)
         schedules.recover()
         app.state.snapshot_schedules=schedules
-        scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent),snapshot_schedules=schedules)
+        scheduler=MonitorScheduler(monitors,inspection_slot,Telegram(store.path.parent),snapshot_schedules=schedules,
+            scenario_tick=lambda:app.state.scenarios.tick(app.state.twin,monitors,evidence))
         app.state.monitors=monitors
         app.state.monitor_scheduler=scheduler
         app.state.agents=AgentStore(store.path.with_name('agents.sqlite'))
