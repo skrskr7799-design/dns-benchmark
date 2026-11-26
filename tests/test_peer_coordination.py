@@ -131,6 +131,27 @@ class Tests(unittest.TestCase):
             self.assertEqual(c.execute("SELECT state FROM goodput_requests WHERE id=?",(self.goodput(5).request_id,)).fetchone()[0],"cancelled")
         self.assertEqual(self.s.evidence_status()["pending"],0)
 
+    def test_goodput_reservation_blocks_real_queued_task_and_rtt(self):
+        self.goodput_claims();p=self.goodput()
+        self.s.peer_admit(self.p)
+        with self.assertRaises(PeerConflict):self.s.goodput_admit(p)
+        self.s.peer_cancel(self.p.request_id)
+        self.s.goodput_admit(p)
+        cfg=AgentRun(endpoints=["udp://127.0.0.1"])
+        self.s.enqueue(self.a["id"],cfg)
+        heartbeat=PollV2(version="2",engine="python-network-v2",capabilities=["dns"])
+        self.assertIsNone(self.s.poll_v2(self.a["credential"],heartbeat)["task"])
+        self.s.goodput_cancel(p.request_id)
+        self.assertIsNotNone(self.s.poll_v2(self.a["credential"],heartbeat)["task"])
+
+    def test_goodput_clock_highwater_in_other_expiry_paths(self):
+        self.goodput_claims();p=self.goodput()
+        self.s.goodput_admit(p);self.s.goodput_cancel(p.request_id)
+        self.now+=120
+        self.s.poll_v2(self.a["credential"],PollV2(version="2",engine="python-network-v2",capabilities=["dns"]))
+        self.now-=60
+        with self.assertRaises(PeerConflict):self.s.goodput_report_claims(self.a["credential"],[p.policy])
+
     def test_goodput_global_budget_and_migration(self):
         from backend.ndc.peer_throughput import ThroughputPolicy,ThroughputPlan
         with self.s.db() as c:

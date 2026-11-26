@@ -63,6 +63,9 @@ class GoodputCoordination:
         # Do not delete history or reset admission budget on clock rollback.
         last=c.execute("SELECT last FROM goodput_clock WHERE singleton=1").fetchone()[0]
         if not math.isfinite(now) or now<last:return
+        # Expiry can prune budget/history outside goodput calls; persist its
+        # clock too so a later rollback cannot reopen an already aged window.
+        c.execute("UPDATE goodput_clock SET last=? WHERE singleton=1",(now,))
         c.execute("""UPDATE goodput_requests SET state='interrupted',finished=?
             WHERE finished IS NULL AND deadline<=?""",(now,now))
         c.execute("DELETE FROM goodput_requests WHERE finished IS NOT NULL AND finished<?",(now-RETENTION,))
