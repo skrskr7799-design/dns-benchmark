@@ -112,4 +112,61 @@ class Tests(unittest.TestCase):
         report,error=measure_throughput(self.plan,self.g.issue(self.plan),[self.policy],cancel,cert=self.a[0],key=self.a[1],ca=self.ca)
         self.assertIsNone(report);self.assertEqual(error,"cancelled")
 
+
+    def test_local_runtime_exact_opt_in_and_real_exchange(self):
+        from backend.ndc.agent_client import atomic
+        from backend.ndc.peer_throughput_runtime import ThroughputRuntime,BudgetDenied
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);runtimes=[]
+            for i,(node,files) in enumerate((("a"*32,self.a),("b"*32,self.b))):
+                folder=root/str(i);folder.mkdir()
+                for name,path in (("peer-cert.pem",files[0]),("peer-key.pem",files[1]),("peer-ca.pem",self.ca)):
+                    target=folder/name;target.write_bytes(path.read_bytes());target.chmod(0o600)
+                with self.assertRaises(FileNotFoundError):ThroughputRuntime(folder,node,atomic)
+                atomic(folder/"peer-throughput.json",[self.policy.model_dump(mode="json")])
+                runtimes.append(ThroughputRuntime(folder,node,atomic))
+            source,receiver=runtimes;cancel=threading.Event();ready=threading.Event();tokens=[];reports=[];errors=[]
+            def publish(token):tokens.append(token);ready.set()
+            def run():
+                try:reports.append(receiver.receiver(self.plan,cancel,publish))
+                except Exception as exc:errors.append(exc);ready.set()
+            worker=threading.Thread(target=run,daemon=True);worker.start()
+            try:
+                self.assertTrue(ready.wait(3));self.assertEqual(errors,[])
+                report,error=source.source(self.plan,tokens[0],cancel)
+                self.assertIsNone(error);self.assertIsNotNone(report)
+            finally:
+                worker.join(11);cancel.set();worker.join(2)
+            self.assertFalse(worker.is_alive());self.assertEqual(errors,[])
+            self.assertEqual(reports,[(report,None)])
+            restarted=ThroughputRuntime(root/"0","a"*32,atomic)
+            with self.assertRaises(BudgetDenied):restarted.source(self.plan,tokens[0],threading.Event())
+            other=ThroughputPlan(request_id="d"*32,policy=self.policy.model_copy(update={"rate_bps":2000000}))
+            with self.assertRaises(PermissionError):source.source(other,tokens[0],threading.Event())
+
+    def test_durable_traffic_window_restart_reboot_and_write_failure(self):
+        from backend.ndc.agent_client import atomic
+        from backend.ndc.peer_throughput_runtime import TrafficBudget,BudgetDenied,WINDOW_NS
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"budget.json";now=[WINDOW_NS];boot=["11111111-1111-1111-1111-111111111111"]
+            def load(writer=atomic):return TrafficBudget(path,writer,clock=lambda:now[0],boot=lambda:boot[0])
+            def plan(n):return ThroughputPlan(request_id=format(n,"032x"),policy=ThroughputPolicy(direction=self.d,byte_count=4194304,rate_bps=8000000))
+            b=load()
+            for n in range(4):b.reserve(plan(n))
+            b=load()
+            with self.assertRaises(BudgetDenied):b.reserve(plan(4))
+            now[0]-=1
+            with self.assertRaises(BudgetDenied):b.reserve(plan(4))
+            now[0]=2*WINDOW_NS;b.reserve(plan(4))
+            with self.assertRaises(BudgetDenied):b.reserve(plan(0))
+            boot[0]="22222222-2222-2222-2222-222222222222";now[0]=1;b=load()
+            with self.assertRaises(BudgetDenied):b.reserve(plan(5))
+            now[0]=WINDOW_NS;b.reserve(plan(5))
+            def broken(path,value):raise OSError("simulated persistence error")
+            b=load(broken)
+            with self.assertRaises(OSError):b.reserve(plan(6))
+            with self.assertRaises(BudgetDenied):b.reserve(plan(7))
+            path.chmod(0o644)
+            with self.assertRaises(ValueError):load()
+
 if __name__=="__main__":unittest.main()

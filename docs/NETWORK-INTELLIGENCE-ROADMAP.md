@@ -118,6 +118,7 @@ Work branches, one coherent pass per commit, green exact-head CI before moving o
 | NIP-05A4b2a | implemented / CI passed (45760382194) | internal durable peer coordination, shared reservation and evidence reconciliation |
 | NIP-05A4b2b1 | implemented / CI passed (45768493456) | gated peer API and one-shot volatile grant relay |
 | NIP-05A4b2b2 | implemented candidate / CI pending | opt-in local RTT runtime and durable execution journal |
-| NIP-05A4c1 | implemented candidate / CI pending | bounded directional mTLS goodput transport, separately approved |
-| NIP-05A4c2..C | planned | throughput coordination, runtime hardening, UI and acceptance |
+| NIP-05A4c1 | implemented / CI passed (45769505682) | bounded directional mTLS goodput transport, separately approved |
+| NIP-05A4c2a | implemented candidate / CI pending | explicit local throughput runtime boundary and durable per-agent traffic budget |
+| NIP-05A4c2b..C | planned | throughput coordination, runtime hardening, UI and acceptance |
 | NIP-06..13 | planned | remaining modules; final visual acceptance, physical budget and shared scheduler hardening remain open; [server acceptance gate](SERVER-ACCEPTANCE.md) |
