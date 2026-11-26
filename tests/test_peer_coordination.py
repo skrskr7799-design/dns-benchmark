@@ -92,6 +92,7 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"cancelled")
     def test_migration(self):
         with self.s.db() as c:
+            c.execute("DROP TABLE peer_transfers")
             c.execute("DROP TABLE peer_requests");c.execute("DROP TABLE peer_claims");c.execute("PRAGMA user_version=3")
         self.s.initialize();self.admit()
         self.assertEqual(self.s.peer_detail(self.p.request_id)["state"],"queued")

@@ -6,6 +6,7 @@ from pydantic import Field,model_validator
 from .remote_contract import Strict,TaskID
 from .peer_contract import PeerDirection,RTTPlan,RTTReport
 from .peer_coordination import PeerConflict
+from .peer_throughput import ThroughputPlan,ThroughputReport,ThroughputPolicy
 from .agent_store import AgentError
 
 router=APIRouter(prefix="/api/v1/agents")
@@ -13,6 +14,7 @@ Token=Annotated[str,Field(pattern=r"^[A-Za-z0-9_-]{43}$")]
 
 class Claims(Strict):
     directions:list[PeerDirection]=Field(max_length=64)
+    policies:list[ThroughputPolicy]=Field(default_factory=list,max_length=64)
 class Empty(Strict):pass
 class RequestID(Strict):
     id:TaskID
@@ -23,9 +25,11 @@ class Ready(Leased):
 class Finish(Leased):
     report:RTTReport|None=None
     echoes:int|None=Field(default=None,ge=0,le=5)
+    transfer_report:ThroughputReport|None=None
+    receiver_report:ThroughputReport|None=None
     @model_validator(mode="after")
     def role(self):
-        if (self.report is None)==(self.echoes is None):raise ValueError("Exactly one result")
+        if sum(x is not None for x in (self.report,self.echoes,self.transfer_report,self.receiver_report))!=1:raise ValueError("Exactly one result")
         return self
 
 def store(request):
@@ -51,7 +55,7 @@ async def body(request,model):
     except (ValueError,TypeError):raise HTTPException(422,"Invalid peer payload") from None
 
 @router.post("/peer-requests",status_code=202)
-def admit(request:Request,plan:RTTPlan):
+def admit(request:Request,plan:RTTPlan|ThroughputPlan):
     return call(store(request).peer_admit,plan)
 
 @router.get("/peer-requests")
@@ -69,7 +73,7 @@ def cancel(request:Request,id:TaskID):
 @router.post("/machine/peer/claims")
 async def claims(request:Request):
     s=store(request);cred=credential(request);b=await body(request,Claims)
-    await run_in_threadpool(call,s.peer_report_claims,cred,b.directions)
+    await run_in_threadpool(call,s.peer_report_claims,cred,b.directions,b.policies)
     return {"accepted":True}
 
 @router.post("/machine/peer/offer")
@@ -102,4 +106,7 @@ async def status(request:Request):
 @router.post("/machine/peer/finish")
 async def finish(request:Request):
     s=store(request);cred=credential(request);b=await body(request,Finish)
+    if b.transfer_report is not None or b.receiver_report is not None:
+        return await run_in_threadpool(call,s.peer_finish_transfer,cred,b.id,b.lease,
+            b.receiver_report if b.receiver_report is not None else b.transfer_report,receiver=b.receiver_report is not None)
     return await run_in_threadpool(call,s.peer_finish,cred,b.id,b.lease,report=b.report,echoes=b.echoes)

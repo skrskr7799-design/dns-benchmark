@@ -116,6 +116,7 @@ class Tests(unittest.TestCase):
     def test_migration_and_expired_task_no_fake_result(self):
         task=self.lease();self.complete(task)
         with self.a.db() as c:
+            c.execute("DROP TABLE peer_transfers")
             c.execute("DROP TABLE peer_requests")
             c.execute("DROP TABLE peer_claims")
             c.execute("DROP TABLE remote_batch_policy")

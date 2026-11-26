@@ -24,7 +24,7 @@ def digest(token):
 def secret():
     return secrets.token_urlsafe(32)
 
-from .peer_coordination import PeerCoordination,SCHEMA as PEER_SCHEMA
+from .peer_coordination import PeerCoordination,SCHEMA as PEER_SCHEMA,TRANSFER_SCHEMA
 
 class AgentStore(PeerCoordination):
     # Only implemented types; each agent must explicitly claim local support.
@@ -53,7 +53,7 @@ class AgentStore(PeerCoordination):
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2,3,4):
+            if version not in (0,1,2,3,4,5):
                 raise RuntimeError("Unsupported agent schema")
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript("""
@@ -115,6 +115,9 @@ class AgentStore(PeerCoordination):
 
             if version<4:
                 c.executescript("BEGIN IMMEDIATE;"+PEER_SCHEMA+"PRAGMA user_version=4;COMMIT;")
+
+            if version<5:
+                c.executescript("BEGIN IMMEDIATE;"+TRANSFER_SCHEMA+"PRAGMA user_version=5;COMMIT;")
 
     def capability_list(self):
         with self.db() as c:
