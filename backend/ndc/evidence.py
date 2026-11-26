@@ -141,7 +141,7 @@ class EvidenceStore:
     def initialize(self):
         with self.db() as c:
             version=c.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0,1,2):
+            if version not in (0,1,2,3):
                 raise RuntimeError("Unsupported intelligence schema")
             if version==0:
                 c.executescript("""
@@ -206,6 +206,12 @@ class EvidenceStore:
                 PRAGMA user_version=2;
                 COMMIT;
                 """)
+            if version<3:
+                from .time_machine import install
+                c.execute("BEGIN IMMEDIATE")
+                install(c)
+                c.execute("PRAGMA user_version=3")
+                c.commit()
             c.execute("PRAGMA journal_mode=WAL")
 
     def make_room(self,c,source,size,now,protected,budget):

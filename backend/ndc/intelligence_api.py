@@ -1,7 +1,9 @@
 """Authenticated read-only evidence API; no network probes or raw source payloads."""
 from typing import Literal
 from fastapi import APIRouter,Request,Query,HTTPException
-from .evidence import Source,Kind,Outcome
+from .evidence import Source,Kind,Outcome,Conflict,Capacity
+from .time_machine import SnapshotStore
+from pydantic import BaseModel,ConfigDict,Field
 from .dns_cohorts import aggregate,NarrowQuery
 from .dns_intelligence import rank
 from .observatory import analyze
@@ -86,6 +88,45 @@ def observatory_monitor(request:Request,id:str,
         "stream_error":state.evidence_drain.errors.get("monitor-v1"),"complete_window_verified":False,
         "source_and_derived_status_not_atomic":True}
     return result
+
+class SnapshotRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid",strict=True)
+    request_id:str=Field(pattern=r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
+    label:str=Field(min_length=1,max_length=80)
+
+def snapshots(request):
+    return SnapshotStore(request.app.state.evidence)
+
+@router.get("/time-machine/snapshots")
+def snapshot_list(request:Request,before:int|None=Query(None,ge=1,le=MAX_SEQ),limit:int=Query(50,ge=1,le=100)):
+    return snapshots(request).list(before=before,limit=limit)
+
+@router.post("/time-machine/snapshots",status_code=201)
+def snapshot_create(request:Request,body:SnapshotRequest):
+    try:
+        return snapshots(request).create(body.request_id,body.label,request.app.state.monitors)
+    except (Conflict,Capacity) as exc: raise HTTPException(409,str(exc)) from None
+    except ValueError: raise HTTPException(422,"Invalid snapshot request") from None
+
+@router.get("/time-machine/compare")
+def snapshot_compare(request:Request,older:str=Query(...,min_length=36,max_length=36),newer:str=Query(...,min_length=36,max_length=36)):
+    try:
+        result=snapshots(request).compare(older,newer)
+    except ValueError as exc: raise HTTPException(422,str(exc)) from None
+    if result is None: raise HTTPException(404,"Snapshot not found")
+    return result
+
+@router.get("/time-machine/snapshots/{id}")
+def snapshot_detail(request:Request,id:str):
+    result=snapshots(request).get(id)
+    if result is None: raise HTTPException(404,"Snapshot not found")
+    return result
+
+@router.delete("/time-machine/snapshots/{id}",status_code=204)
+def snapshot_delete(request:Request,id:str):
+    from fastapi import Response
+    if not snapshots(request).delete(id): raise HTTPException(404,"Snapshot not found")
+    return Response(status_code=204)
 
 @router.get("/{kind}")
 def page(request:Request,kind:EvidenceKind,after:int=Query(0,ge=0,le=MAX_SEQ),

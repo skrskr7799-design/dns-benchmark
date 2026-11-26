@@ -109,6 +109,8 @@ jobs:
         run: docker exec -i benchmark python - < tests/test_observatory_live.py
       - name: Scheduled maintenance isolation and scheduler claim recovery
         run: docker exec -i benchmark python - < tests/test_maintenance.py
+      - name: Time Machine immutable snapshots and semantic diff
+        run: docker exec -i benchmark python - < tests/test_time_machine.py
       - name: Concurrency and bounded integration tests
         run: docker exec -i benchmark python - < tests/test_performance.py
       - name: Browser smoke

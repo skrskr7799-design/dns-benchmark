@@ -15,6 +15,7 @@ expect_error(urllib.request.Request(base+'/api/status'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/observations'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/events'),401)
 expect_error(urllib.request.Request(base+'/api/v1/intelligence/observatory/monitors'),401)
+expect_error(urllib.request.Request(base+'/api/v1/intelligence/time-machine/snapshots'),401)
 login=urllib.request.Request(base+'/api/auth/login',data=json.dumps({'password':os.environ['NDC_OWNER_PASSWORD']}).encode(),headers={'Content-Type':'application/json','X-NDC-Request':'1'})
 with opener.open(login,timeout=10) as response:
     csrf=json.load(response)['csrf']
@@ -195,10 +196,30 @@ monitor=request("/api/v1/monitoring/monitors",{"name":"smoke","host":"127.0.0.1"
 assert monitor["enabled"] is False
 assert request("/api/v1/monitoring")["monitors"][0]["id"]==monitor["id"]
 assert request("/api/v1/monitoring/monitors/"+monitor["id"]+"/history")==[]
+maintenance_path="/api/v1/monitoring/monitors/"+monitor["id"]+"/maintenance"
+scheduled=request(maintenance_path,{"starts_at":time.time()+120,"ends_at":time.time()+240})
+assert scheduled["state"]=="scheduled"
+assert request(maintenance_path)[0]["id"]==scheduled["id"]
+req=urllib.request.Request(base+maintenance_path+"/"+str(scheduled["id"]),method="DELETE",headers={"X-CSRF-Token":csrf})
+with opener.open(req,timeout=10) as response: assert json.load(response)["state"]=="cancelled"
+import uuid
+snapshot_path="/api/v1/intelligence/time-machine/snapshots"
+payload={"request_id":str(uuid.uuid4()),"label":"smoke before"}
+expect_error(urllib.request.Request(base+snapshot_path,data=json.dumps(payload).encode(),headers={"Content-Type":"application/json"}),403)
+snap=request(snapshot_path,payload)
+assert snap["snapshot"]["monitors"][0]["observation_status"]=="paused"
+assert request(snapshot_path,payload)==snap
+assert request(snapshot_path+"/"+snap["id"])==snap
 req=urllib.request.Request(base+"/api/v1/monitoring/monitors/"+monitor["id"],method="DELETE",headers={"X-CSRF-Token":csrf})
 with opener.open(req,timeout=10) as response:
     assert response.status==204
 assert request("/api/v1/monitoring")["monitors"]==[]
+after=request(snapshot_path,{"request_id":str(uuid.uuid4()),"label":"smoke after"})
+diff=request("/api/v1/intelligence/time-machine/compare?older="+snap["id"]+"&newer="+after["id"])
+assert diff["changes"][0]["kind"]=="monitor_removed"
+for snapshot in (snap,after):
+    req=urllib.request.Request(base+snapshot_path+"/"+snapshot["id"],method="DELETE",headers={"X-CSRF-Token":csrf})
+    with opener.open(req,timeout=10) as response: assert response.status==204
 # Exercise the actual scheduler and real TCP/HTTP fixture, not only CRUD.
 http_fixture=ThreadingHTTPServer(("127.0.0.1",0),HeadFixture)
 thread=threading.Thread(target=http_fixture.serve_forever,daemon=True)
