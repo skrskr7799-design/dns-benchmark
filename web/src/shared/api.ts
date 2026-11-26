@@ -101,7 +101,13 @@ export interface GlobalCapabilities {agents:{id:string;fresh:boolean;dispatchabl
 export interface IntegrityAgreement {name:string;qtype:string;family:string;vantage:string;started_at:number;finished_at:number;comparable:number;groups:number;agreement:boolean|null;results:InspectionResult[];limitations:string[]}
 export interface DNSSECConfig {endpoint:string;family:'ipv4'|'ipv6';positive:{name:string;expected_ipv4:string};bogus:{name:string;expected_ipv4:string};anchor:{signer:string;dnskey:string}|null}
 export interface DNSSECCheck {endpoint:string;vantage:string;started_at:number;finished_at:number;behavior:string;checks:{control:string;name:string;checking_disabled_requested:boolean;expected_answer:boolean;response:InspectionResult}[];signature:{status:string;key_tag:number|null};chain_validated:boolean;limitations:string[]}
+export interface LabConfig {endpoints:string[];max_queries:number;max_seconds:number;max_parallel:number;max_count:number;corpus:string[];warmup:string}
+export interface LabProfile {endpoints:string[];families:('ipv4'|'ipv6')[];modes:('cold'|'warm')[];count:number;parallel:1|2}
+export interface LabResult {methodology:string;profile:LabProfile;profile_key:string|null;vantage:string;status:'completed'|'deadline';started_at:number;finished_at:number;planned_queries:number;rows:(Result&{family:string;expected_protocol:string;transport_matched:boolean;samples:Sample[];warmup:{ok:boolean;error:string|null}|null})[];comparisons:{endpoint:string;family:string;status:string;warm_minus_cold_p50_ms:number|null}[];limitations:string[]}
 export const api = {
+  labConfig:(signal?:AbortSignal)=>request<LabConfig>('/api/v1/intelligence/protocol-lab',{signal}),
+  labRun:(body:LabProfile)=>request<LabResult>('/api/v1/intelligence/protocol-lab',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}),
+
   integrityAgreement:(config:{name:string;qtype:string;endpoints:string[];family:'ipv4'|'ipv6'})=>request<IntegrityAgreement>('/api/v1/intelligence/dns/integrity/agreement',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
   integrityDNSSEC:(config:DNSSECConfig)=>request<DNSSECCheck>('/api/v1/intelligence/dns/integrity/dnssec',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(config)}),
 

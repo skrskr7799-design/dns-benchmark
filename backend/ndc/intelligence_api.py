@@ -11,6 +11,7 @@ from .dns_cohorts import aggregate,NarrowQuery
 from .dns_intelligence import rank
 from .observatory import analyze
 from .dns_integrity import Agreement,DNSSECCheck,agreement,dnssec_check
+from .protocol_lab import LabProfile,capability as lab_capability,run as lab_run
 import time
 
 router=APIRouter(prefix="/api/v1/intelligence")
@@ -29,6 +30,20 @@ def integrity_dnssec(body:DNSSECCheck):
     if not inspection_slot.acquire(blocking=False):
         raise HTTPException(409,"Network inspection already running")
     try:return dnssec_check(body)
+    finally:inspection_slot.release()
+
+@router.get("/protocol-lab")
+def protocol_lab_config():
+    try:return lab_capability()
+    except (ValueError,TypeError):raise HTTPException(409,"Invalid laboratory configuration") from None
+
+@router.post("/protocol-lab")
+def protocol_lab_run(body:LabProfile):
+    if not inspection_slot.acquire(blocking=False):
+        raise HTTPException(409,"Network inspection already running")
+    try:return lab_run(body)
+    except PermissionError:raise HTTPException(403,"Endpoint not authorized for laboratory") from None
+    except (ValueError,RuntimeError):raise HTTPException(409,"Laboratory unavailable") from None
     finally:inspection_slot.release()
 
 @router.get("/dns/cohorts")

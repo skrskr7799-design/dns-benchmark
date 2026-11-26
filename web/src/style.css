@@ -86,3 +86,5 @@ main{position:relative;max-width:none;padding:26px clamp(18px,2.1vw,34px);backgr
 .global-launch details{border-top:1px solid var(--border);padding:12px 0}.global-launch summary{cursor:pointer;font-weight:600}.global-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;border:0;padding:0;margin:12px 0;min-width:0}.global-fields label,.global-fields input,.global-fields select{min-width:0;width:100%}.global-check{display:flex;align-items:center;gap:8px;overflow-wrap:anywhere;margin:10px 0}.global-check input{width:auto;flex:none}.global-agent-picker{max-height:240px;overflow:auto}.global-launch form{min-width:0}.global-launch p{overflow-wrap:anywhere}@media(max-width:600px){.global-fields{grid-template-columns:minmax(0,1fr)}}
 
 .integrity-result{overflow-wrap:anywhere}.integrity-result .tm-record dd{font-size:14px}.integrity-result table td{vertical-align:top}
+
+.lab-fields{margin:12px 0}.lab-fields legend{color:var(--muted);padding:0 0 6px}.lab-fields .global-check{width:auto;min-width:0;word-break:break-word}.lab-samples{border-top:1px solid var(--border);padding:12px 0;overflow-wrap:anywhere}.lab-samples summary{cursor:pointer}
