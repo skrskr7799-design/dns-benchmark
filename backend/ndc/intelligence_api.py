@@ -72,10 +72,10 @@ def observatory_monitor(request:Request,id:str,
         if before>now+60:
             raise ValueError("Future window")
         rows,usage=state.evidence.observatory_rows(id,since=since,before=before)
-        result=analyze(rows,monitor,since=since,before=before,now=now)
         persisted=state.monitors.observatory_snapshot(id,since,before)
         if persisted is None:
             raise HTTPException(404,"Monitor not found")
+        result=analyze(rows,monitor,since=since,before=before,now=now,boundaries=persisted["journal"])
         result["persistent"]=persisted
         result["limitations"].append("window_reconstruction_not_authoritative_live_state")
     except NarrowQuery:

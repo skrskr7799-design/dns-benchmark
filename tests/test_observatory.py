@@ -59,6 +59,13 @@ class Tests(unittest.TestCase):
         self.assertIsNone(analyze([row(0)],MON,since=0,before=1100,now=3000)["current_state"])
         with self.assertRaises(NarrowQuery): report([row(0)]*(MAX_ROWS+1))
 
+    def test_recorded_short_pause_breaks_baseline(self):
+        rows=[row(i) for i in range(12)]+[row(12,60),row(13,60)]
+        bounds=[{"seq":1,"type":"monitor.paused","at":1705},{"seq":2,"type":"monitor.resumed","at":1710}]
+        r=analyze(rows,MON,since=0,before=2000,now=2000,boundaries=bounds)
+        self.assertTrue(r["points"][12]["boundary_before"])
+        self.assertEqual(r["points"][12]["state"],"learning")
+        self.assertEqual(r["signals"],[])
     def test_store_projection_and_window(self):
         with tempfile.TemporaryDirectory() as root:
             root=Path(root);now=[1000.]

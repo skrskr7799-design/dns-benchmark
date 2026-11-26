@@ -79,11 +79,13 @@ def advance(state,r,interval,evidence_id=None):
         "mad_ms":mad,"threshold_ms":threshold,"baseline_samples":len(baseline),"state":status,"gap_before":gap}
     return next_state,point,signals
 
-def analyze(rows,monitor,*,since,before,now):
+def analyze(rows,monitor,*,since,before,now,boundaries=()):
     if len(rows)>MAX_ROWS: raise NarrowQuery("Narrow observatory window")
     interval=monitor["config"]["interval_seconds"]
     gap_threshold=3*interval
     counts=Counter();signals=[];points=[];state=initial_state()
+    boundaries=sorted((b for b in boundaries if b['type'] in ('tracking.started','monitor.paused','monitor.resumed')),key=lambda b:(b['at'],b['seq']))
+    boundary_index=0
     for item in rows:
         r=item["record"]
         if r["source_id"]!=monitor["id"] or r["source_kind"]!="monitor":
@@ -91,7 +93,18 @@ def analyze(rows,monitor,*,since,before,now):
         at=r["observed_at"]
         if at is None or not since<=at<before: continue
         counts[r["outcome"]]+=1
+        reset=False
+        while boundary_index<len(boundaries) and boundaries[boundary_index]["at"]<=at:
+            boundary_index+=1;reset=True
+        if reset:
+            if state["active"]:
+                signals.append({"type":"anomaly.interrupted","at":at,"reason":"recorded_monitor_boundary","evidence_id":None})
+            state=initial_state()
+        old_identity=state["identity"]
         state,point,transitions=advance(state,r,interval,item["id"])
+        changed=old_identity is not None and old_identity!=state["identity"]
+        point["boundary_before"]=reset
+        point["comparison_changed"]=changed
         points.append(point|{"received_at":item["received_at"]});signals.extend(transitions)
     known=sum(counts[k] for k in ("success","partial","failure"))
     total=len(points)
@@ -112,6 +125,6 @@ def analyze(rows,monitor,*,since,before,now):
         "policy":{"baseline_minimum":MIN_BASELINE,"baseline_maximum":BASELINE_SIZE,"baseline_max_age_seconds":BASELINE_AGE,
             "confirmation_checks":CONFIRM,"recovery_checks":CONFIRM,"gap_seconds":gap_threshold,
             "threshold":"median + max(5 ms, 0.5 * median, 6 * 1.4826 * MAD)"},
-        "limitations":["retained_window_only","not_continuous_uptime","historical_pause_intervals_unknown",
+        "limitations":["retained_window_only","not_continuous_uptime","historical_pause_coverage_not_verified",
             "missing_checks_not_failures","signals_recomputed_not_persisted","latency_signal_not_root_cause",
             "no_cross_monitor_correlation","no_new_network_probes"]}
